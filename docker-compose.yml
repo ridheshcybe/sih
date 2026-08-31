@@ -1,0 +1,168 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# Aero Piston Engine Digital Twin - Docker Compose
+# ══════════════════════════════════════════════════════════════════════════════
+#
+# Multi-container deployment for the complete Digital Twin system:
+# - timescaledb: PostgreSQL 16 + TimescaleDB for time-series data
+# - simulator: Python telemetry streamer (10 Hz engine simulation)
+# - ai-service: Python AI fusion and anomaly detection
+# - backend: Node.js WebSocket gateway and REST API
+# - frontend: React dashboard served by Nginx
+#
+# Usage:
+#   docker-compose up -d          # Start all services
+#   docker-compose up -d --build  # Rebuild and start
+#   docker-compose down           # Stop all services
+#   docker-compose logs -f        # Follow logs
+#
+# ══════════════════════════════════════════════════════════════════════════════
+
+version: '3.8'
+
+services:
+  # ─── TimescaleDB (PostgreSQL + TimescaleDB) ─────────────────────────────
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    container_name: aerotwin-timescaledb
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: aerotwin
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5432:5432"
+    volumes:
+      - timescaledb_data:/var/lib/postgresql/data
+      - ./simulator/src/db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d aerotwin"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - aerotwin-network
+
+  # ─── Simulator (Python Telemetry Streamer) ──────────────────────────────
+  simulator:
+    build:
+      context: ./simulator
+      dockerfile: Dockerfile
+    container_name: aerotwin-simulator
+    restart: unless-stopped
+    environment:
+      SIMULATION_HZ: "10"
+      WEBSOCKET_PORT: "8765"
+    ports:
+      - "8765:8765"
+    volumes:
+      - shared_logs:/app/logs
+      - shared_data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s=socket.socket(); s.connect(('localhost', 8765)); s.close()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    networks:
+      - aerotwin-network
+
+  # ─── AI Service (Python Fusion ML) ──────────────────────────────────────
+  ai-service:
+    build:
+      context: ./fusion_ml
+      dockerfile: Dockerfile
+    container_name: aerotwin-ai-service
+    restart: unless-stopped
+    environment:
+      SIMULATOR_WS_URL: "ws://simulator:8765"
+      BACKEND_WS_URL: "ws://backend:8766"
+      PYTHONPATH: /app
+    ports:
+      - "8766:8766"
+    volumes:
+      - shared_logs:/app/logs
+      - shared_data:/app/data
+      - ./fusion_ml/models:/app/fusion_ml/models
+    depends_on:
+      simulator:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s=socket.socket(); s.connect(('localhost', 8766)); s.close()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - aerotwin-network
+
+  # ─── Backend (Node.js WebSocket Gateway) ────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: aerotwin-backend
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      AI_STREAM_PORT: "8766"
+      CLIENT_WS_PORT: "8080"
+      DATABASE_URL: "postgres://postgres:password@timescaledb:5432/aerotwin"
+      LOG_DIR: /app/logs
+    ports:
+      - "8080:8080"
+      - "8081:8081"
+    volumes:
+      - shared_logs:/app/logs
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      ai-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    networks:
+      - aerotwin-network
+
+  # ─── Frontend (React + Nginx) ───────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: aerotwin-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - aerotwin-network
+
+# ─── Volumes ───────────────────────────────────────────────────────────────
+volumes:
+  timescaledb_data:
+    driver: local
+    name: aerotwin-timescaledb-data
+  shared_logs:
+    driver: local
+    name: aerotwin-shared-logs
+  shared_data:
+    driver: local
+    name: aerotwin-shared-data
+
+# ─── Networks ──────────────────────────────────────────────────────────────
+networks:
+  aerotwin-network:
+    driver: bridge
+    name: aerotwin-network

@@ -1,0 +1,65 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# Docker Ignore - Root
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Version control
+.git
+.gitignore
+.gitmodules
+
+# IDE files
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# Node modules (each service has its own)
+node_modules
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info
+dist
+build
+.eggs
+
+# Logs
+*.log
+logs/
+
+# Data files
+data/
+
+# Docker compose files (not needed inside containers)
+docker-compose*.yml
+Dockerfile*
+
+# Documentation
+*.md
+LICENSE
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Test files
+*.test.*
+tests/
+coverage/
+.nyc_output
+
+# Environment files (should be mounted, not copied)
+.env
+.env.local
+.env.*.local
+
+# Build artifacts
+dist/
+build/
+.next/
+.nuxt/
