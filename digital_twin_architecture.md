@@ -1,6 +1,6 @@
 # SIH26054 Aero Piston Engine Digital Twin Architecture Design
 
-This document outlines the core architectural modules, data definitions, and state representations for the Digital Twin of the SIH26054 aero piston engine.
+This document outlines the core architectural modules, data definitions, state representations, and communication protocols for the Digital Twin of the SIH26054 aero piston engine.
 
 ## PART A: Module Responsibilities Table
 
@@ -134,3 +134,210 @@ These concepts represent different stages of data transformation and analysis, m
 *   **Mission Summary:**
     *   **Definition:** A compiled, comprehensive narrative or structured report detailing the performance and events of a completed mission. It synthesizes data from the entire flight/operational profile.
     *   **Example:** A report stating: "Mission achieved 98% of nominal performance. An elevated vibration alert was logged during the descent phase, contributing to a marginal reduction in overall engine efficiency."
+
+---
+
+## PART C: REST API Design
+
+This section defines the comprehensive API endpoints required for synchronous, request/response interactions with the Digital Twin backend. All endpoints are assumed to be secured via API keys and versioned (e.g., `/api/v1/...`).
+
+### 1. Mission Management
+
+| Endpoint | Method | Purpose | Request Schema (brief) | Response Schema (brief) | Example Error Responses |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| `/api/missions/start` | POST | Initiates a new mission profile simulation or operational logging session. | `{ "mission_id": "...", "engine_id": "...", "profile": [...] }` | `{ "status": "started", "mission_id": "...", "start_time": "..." }` | 400: Invalid profile structure; 404: Engine ID not found. |
+| `/api/missions/stop` | POST | Terminates the currently active mission session/logging. | `{ "mission_id": "..." }` | `{ "status": "stopped", "message": "Mission ended successfully." }` | 403: Not authorized; 404: Mission ID not found. |
+| `/api/missions` | GET | Retrieves a list of all mission records for a given engine or time range. | Query Params: `engine_id`, `start_date`, `end_date` | `[{ "mission_id": "...", "status": "...", "start_time": "..." }, ...]` | 500: Database connection failure. |
+| `/api/missions/{mission_id}` | GET | Retrieves the full, summary details of a specific historical mission. | None | `{ "summary": "...", "overall_health": "...", "duration": "..." }` | 404: Mission ID not found. |
+
+### 2. Engine State & Telemetry
+
+| Endpoint | Method | Purpose | Request Schema (brief) | Response Schema (brief) | Example Error Responses |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| `/api/engines/{engine_id}` | GET | Retrieves a high-level summary of the engine (e.g., serial number, model). | None | `{ "engine_id": "...", "model": "...", "status": "Online" }` | 404: Engine ID not found. |
+| `/api/engines/{engine_id}/state` | GET | Fetches the latest, aggregated Digital Twin State object. | None | `{ "timestamp": "...", "health_state": "Degraded", "rul": 450, ... }` | 403: State data too old. |
+| `/api/engines/{engine_id}/telemetry` | GET | Retrieves historical time-series sensor data for the specified period. | Query Params: `start_time`, `end_time`, `sensors` | `[ { "timestamp": "...", "sensor_x": 10.5, "sensor_y": 22.1 }, ... ]` | 400: Invalid time range parameters. |
+| `/api/engines/{engine_id}/health` | GET | Retrieves the time-series history of the calculated Health Index (HI). | Query Params: `start_time`, `end_time` | `[ { "timestamp": "...", "hi_score": 95.2 }, ... ]` | 403: Unauthorized access to health data. |
+| `/api/engines/{engine_id}/faults` | GET | Lists all recorded fault events and warnings for the engine. | Query Params: `severity` (Critical, Warning) | `[ { "fault_id": "...", "severity": "...", "timestamp": "...", "description": "..." }, ... ]` | 204: No faults recorded. |
+| `/api/engines/{engine_id}/rul` | GET | Retrieves the historical and current Remaining Useful Life (RUL) estimates. | Query Params: `component` (e.g., "Bearing A") | `{ "component": "Bearing A", "current_rul_hrs": 450, "history": [...] }` | 404: Component not tracked. |
+
+### 3. Simulation & Replay
+
+| Endpoint | Method | Purpose | Request Schema (brief) | Response Schema (brief) | Example Error Responses |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| `/api/simulation/start` | POST | Initiates a predictive simulation run based on a proposed mission profile. | `{ "mission_id": "...", "profile": [...] }` | `{ "status": "running", "simulation_id": "...", "message": "Simulation started." }` | 400: Invalid input profile. |
+| `/api/simulation/stop` | POST | Terminates an active simulation run. | `{ "simulation_id": "..." }` | `{ "status": "stopped", "message": "Simulation aborted." }` | 404: Simulation ID not found. |
+| `/api/simulation/status` | GET | Checks the current status and progress of a running simulation. | Query Params: `simulation_id` | `{ "status": "Running", "progress_percent": 75, "eta_minutes": 45 }` | 404: Simulation ID not found. |
+| `/api/faults/inject` | POST | Used in testing/staging to simulate a specific component fault for analysis. | `{ "fault_type": "Bearing Failure", "severity": "Critical", "duration_sec": 30 }` | `{ "status": "success", "message": "Fault injection simulated." }` | 403: Requires elevated permissions. |
+| `/api/replay/start` | POST | Initiates the replay of a historical data segment against the current model. | `{ "mission_id": "...", "start_time": "...", "end_time": "..." }` | `{ "status": "running", "replay_id": "...", "message": "Replay started." }` | 400: Time range is invalid or too large. |
+| `/api/replay/stop` | POST | Stops an active replay session. | `{ "replay_id": "..." }` | `{ "status": "stopped", "message": "Replay aborted." }` | 404: Replay ID not found. |
+| `/api/replay/status` | GET | Reports the status and progress of a running replay analysis. | Query Params: `replay_id` | `{ "status": "Processing", "progress_percent": 60, "analysis_metrics": {...} }` | 404: Replay ID not found. |
+
+### 4. Reporting & System
+
+| Endpoint | Method | Purpose | Request Schema (brief) | Response Schema (brief) | Example Error Responses |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| `/api/reports/{mission_id}` | GET | Generates and downloads a comprehensive PDF/JSON report for a mission. | None | `[File Stream: Report.pdf]` | 404: Mission ID not found; 503: Report generation service unavailable. |
+| `/api/system/health` | GET | Checks the operational health and status of all connected backend services (APIs, Database, Services). | None | `{ "service": "Database", "status": "Operational", "last_check": "..." }` | 500: Internal system failure. |
+
+---
+
+## PART D: WebSocket Design (Real-Time Communication)
+
+The WebSocket channel provides a persistent, bi-directional communication link for real-time updates, bypassing the latency of standard REST polling calls.
+
+### Protocol Specifications
+
+*   **WebSocket URL:** `wss://api.digitaltwin.com/ws/v1/{engine_id}`
+*   **Connection Behavior:** Clients establish a connection and immediately send a **`subscribe`** message indicating interest in specific data streams (e.g., `telemetry`, `health`, `faults`).
+*   **Message Types:** All messages are JSON objects requiring a mandatory `type` field to dictate the content.
+*   **Message Frequency:**
+    *   `telemetry_update`: High frequency (10 - 50 ms).
+    *   `twin_state_update`: Moderate frequency (100 - 500 ms, or upon significant change).
+    *   `anomaly_detected`, `fault_prediction`, `health_update`, `maintenance_advisory`: Event-driven (Immediate, upon occurrence).
+    *   `mission_phase_change`: Event-driven (Immediate).
+    *   `simulation_status`: Variable (As needed for status updates).
+    *   `system_error`: Event-driven (Immediate).
+*   **Reconnection Behavior:** Clients must implement exponential backoff reconnection logic. Attempt connection on failure with increasing delays (e.g., 1s, 2s, 4s, 8s...).
+*   **Heartbeat Mechanism:** A mandatory bi-directional heartbeat is required. Both client and server must send a lightweight `{ "type": "heartbeat", "timestamp": "..." }` message every 30 seconds. Failure to receive a response within 90 seconds triggers a disconnect and reconnection attempt.
+*   **Error Message Format:** Errors are encapsulated JSON messages: `{"type": "system_error", "code": 400, "message": "Invalid subscription requested: 'telemetry' is not supported.", "details": "..."}`.
+*   **Backpressure Handling:** If the client cannot process the high-frequency `telemetry_update` stream, it should send a `flow_control` message: `{"type": "flow_control", "action": "throttle", "priority": "telemetry"}`, signaling the server to temporarily reduce the rate limit for that specific stream type.
+
+### Example JSON Messages
+
+#### 1. `telemetry_update` (High Frequency)
+```json
+{
+  "type": "telemetry_update",
+  "timestamp": "2026-09-04T21:06:00Z",
+  "data": {
+    "rpm": 4500,
+    "oil_pressure_bar": 3.5,
+    "turbine_temp_c": 980.5
+  },
+  "source": "adapter"
+}
+```
+
+#### 2. `twin_state_update` (Medium Frequency)
+```json
+{
+  "type": "twin_state_update",
+  "timestamp": "2026-09-04T21:06:00Z",
+  "state": {
+    "mission_phase": "Cruise",
+    "health_state": "Degraded",
+    "hi_score": 85.2,
+    "rul_estimate_hrs": 450,
+    "alerts": ["Warning: Low Oil Pressure Trend"]
+  }
+}
+```
+
+#### 3. `anomaly_detected` (Event Driven)
+```json
+{
+  "type": "anomaly_detected",
+  "timestamp": "2026-09-04T21:06:05Z",
+  "data": {
+    "metric": "Vibration RMS",
+    "observed_value": 0.95,
+    "expected_range": [0.4, 0.7],
+    "score": 0.91,
+    "confidence": 0.99
+  }
+}
+```
+
+#### 4. `fault_prediction` (Event Driven)
+```json
+{
+  "type": "fault_prediction",
+  "timestamp": "2026-09-04T21:06:10Z",
+  "fault": {
+    "fault_id": "BHARE_003",
+    "name": "Bearing High Vibration",
+    "severity": "Critical",
+    "description": "Vibration amplitude exceeds safety threshold. Immediate inspection required.",
+    "predicted_failure_time": "2026-09-05T10:00:00Z"
+  }
+}
+```
+
+#### 5. `health_update` (Event Driven/Frequency)
+```json
+{
+  "type": "health_update",
+  "timestamp": "2026-09-04T21:06:15Z",
+  "data": {
+    "component": "Turbine Assembly",
+    "health_score": 0.82,
+    "trend_vector": [14.2, 0.5, 0.1],
+    "status_description": "Accelerating degradation rate observed."
+  }
+}
+```
+
+#### 6. `rul_update` (Event Driven/Frequency)
+```json
+{
+  "type": "rul_update",
+  "timestamp": "2026-09-04T21:06:20Z",
+  "data": {
+    "component": "Combustion Chamber",
+    "remaining_cycles": 500,
+    "estimate_hours": 448,
+    "confidence_interval_hrs": [30, 460]
+  }
+}
+```
+
+#### 7. `maintenance_advisory` (Event Driven)
+```json
+{
+  "type": "maintenance_advisory",
+  "timestamp": "2026-09-04T21:06:25Z",
+  "recommendation": {
+    "action": "Schedule Inspection",
+    "priority": "High",
+    "details": "Scheduled inspection of Turbine Blades required within the next 10 operational hours.",
+    "source_module": "Recommendation Engine"
+  }
+}
+```
+
+#### 8. `mission_phase_change` (Event Driven)
+```json
+{
+  "type": "mission_phase_change",
+  "timestamp": "2026-09-04T21:06:30Z",
+  "old_phase": "Cruise",
+  "new_phase": "Descent",
+  "details": "Commencing descent sequence as per flight plan."
+}
+```
+
+#### 9. `simulation_status` (Event Driven/Status)
+```json
+{
+  "type": "simulation_status",
+  "timestamp": "2026-09-04T21:06:35Z",
+  "data": {
+    "simulation_id": "SIM-12345",
+    "status": "Running",
+    "progress_percent": 50,
+    "progress_detail": "Mid-altitude simulation, reaching Mach 0.6."
+  }
+}
+```
+
+#### 10. `system_error` (Event Driven/Error)
+```json
+{
+  "type": "system_error",
+  "timestamp": "2026-09-04T21:06:40Z",
+  "error_code": 503,
+  "message": "Telemetry adapter failed to connect to CAN bus.",
+  "source_module": "Telemetry Adapter",
+  "details": "Check physical connections and service status."
+}
