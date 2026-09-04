@@ -1,122 +1,106 @@
-# SIH26054 Aero Piston Engine Digital Twin - Health Index Specification
+# Remaining Useful Life (RUL) and Degradation Estimation Approach
 
-This document defines the methodology for calculating and interpreting the Engine Health Index (HI), a critical metric designed to provide operational insight into the engine's current condition relative to its expected performance and degradation trajectory. The index operates on a normalized 0–100 scale, where 100 represents perfect health.
+This document defines a credible Remaining Useful Life (RUL) and degradation estimation approach for the prototype aero piston engine digital twin, suitable for simulation and synthetic data analysis.
 
----
+## PART A — RUL Definition
 
-## ⚙️ Part A — Inputs to Health Index (Data Sources)
+### Definition
+For this digital twin prototype, RUL is defined as the **Number of Missions** until a defined failure threshold is reached.
 
-The Health Index calculation relies on synthesizing multiple data streams, each weighted by its reliability and significance.
+*   **Primary Definition:** Missions (count of engine operating cycles or flights).
+*   **Alternative:** Hours of operation (used if mission profiles are highly variable).
+*   **Secondary:** Percentage of life consumed (useful for reporting but not predictive).
 
-### 1. Sensor Residuals ($\text{Res}_{sensor}$)
-*   **Inputs:** Real-time differences between measured sensor values (e.g., Exhaust Gas Temperature - EGT, Oil Pressure, Cylinder Head Temperature - CHT) and the values predicted by the running digital twin model ($\text{Measured} - \text{Predicted}$).
-*   **Aggregation:** Individual residuals should be aggregated into a single $\text{Score}_{Residual}$. The Root Mean Square (RMS) deviation across a critical sensor group (EGT, Oil Pressure, etc.) is recommended.
-*   **Scaling:** Residuals must be scaled relative to the sensor's operational standard deviation ($\sigma_{history}$) and the Mean Absolute Error (MAE) of the prediction model.
-
-### 2. Anomaly Score ($\text{Score}_{Anomaly}$)
-*   **Inputs:** A dedicated Machine Learning model (e.g., Isolation Forest, One-Class SVM) trained on healthy operational data.
-*   **Purpose:** Quantifies the overall deviation of the current multi-dimensional sensor vector from the established "normal" operating envelope, irrespective of predefined thresholds.
-*   **Scaling:** The output score (e.g., $S \in [-1, 1]$) is normalized to $0-100$.
-
-### 3. Fault Probabilities ($\text{Score}_{Fault}$)
-*   **Inputs:** Outputs from specialized ML models diagnosing specific component degradation (e.g., $P_{injector}$ - Injector probability of failure; $P_{bearing}$ - Bearing degradation probability).
-*   **Aggregation:** The maximum probability across all monitored critical systems, weighted by criticality.
-*   **Scaling:** The highest probability $P_{max}$ from any single component model is used. This score reflects the likelihood of an impending failure.
-
-### 4. Degradation Level ($\text{Score}_{Degradation}$)
-*   **Inputs:** A long-term operational trend indicator, often derived from an overall efficiency drop ($\eta$) or rate of change of baseline parameters.
-*   **Purpose:** Captures the cumulative wear and tear not yet visible as an immediate residual spike.
-*   **Scaling:** The decline rate (e.g., \% drop in Specific Fuel Consumption - SFC) is mapped to a score, ensuring a slow decline results in a higher (worse) penalty.
-
-### 5. Data Quality Penalty ($\text{Penalty}_{DataQuality}$)
-*   **Inputs:** Real-time sensor confidence scores (0-1).
-*   **Purpose:** Penalizes the HI if multiple critical sensors report low confidence, invalid, or missing data.
-*   **Calculation:** This is a multiplicative factor (explained in Part B).
-
-### 6. Operating-Condition-Adjusted Limits (OCAL)
-*   **Incorporation:** All residual scoring must be dynamically adjusted by the current operational state (e.g., high throttle vs. idle). The residual must be checked against a dynamic range, not a static one.
+### Suitability for Synthetic Data
+Defining RUL by **Number of Missions** is ideal for synthetic data because degradation is typically modeled as a discrete process. Each mission represents a defined operating cycle (load case, run time) that contributes to cumulative wear. This provides a measurable, integer step that aligns naturally with the run-to-failure simulation methodology, making the RUL estimation process straightforward and deterministic within the model's parameters.
 
 ---
 
-## 📈 Part B — Health Index Formula and Methodology
+## PART B — Estimation Approaches
 
-### 1. Core Health Index Formula
-The proposed formula, designed for simple Python implementation, is:
+We describe three potential RUL estimation methods and select the primary and fallback approaches for the hackathon.
 
-$$
-\text{Health Index} (HI) = \text{MaxScore} - \left( W_R \cdot \text{Score}_{Residual} + W_A \cdot \text{Score}_{Anomaly} + W_F \cdot \text{Score}_{Fault} + W_D \cdot \text{Score}_{Degradation} \right) \times \text{Quality Factor}
-$$
+### 1. Synthetic Degradation-based RUL (Time-to-Threshold)
+This approach models a specific degradation feature (e.g., cylinder bore wear, component temperature deviation) that monotonically increases with usage. The RUL is predicted by extrapolating the current degradation trend until the feature crosses a critical, pre-defined failure threshold.
+*   **Mechanism:** $RUL = \text{Threshold} - \text{Current Degradation}$.
+*   **Advantage:** Conceptually simple, directly links to a single degradation mechanism, and is highly interpretable.
 
-*   **$\text{MaxScore}$:** A baseline score (e.g., 100).
-*   **$\text{Score}_{X}$:** Sub-scores normalized to $0$ (Perfect) to $100$ (Worst).
-*   **$W_X$:** Weights (see below).
-*   **$\text{Quality Factor}$:** Derived from $\text{Penalty}_{DataQuality}$ (see below).
+### 2. Time-to-Threshold Prediction using Sensor Trends
+This method uses the time series analysis of multiple critical sensor signals (e.g., Oil Pressure, Vibration, EGT). Instead of waiting for a single component degradation model, it predicts the time when a *combination* of sensor readings crosses a dangerous envelope or trend boundary.
+*   **Mechanism:** Requires advanced filtering and trend extrapolation (e.g., Kalman filter) across multiple interdependent channels.
+*   **Advantage:** Highly realistic as failure is rarely determined by a single variable; incorporates system-level health assessment.
 
-### 2. Sub-Score Definition and Scaling (0–100)
-Each component score is normalized such that 0 is ideal, and 100 is critically bad.
+### 3. Regression or Survival Model (Proportional Hazards Model)
+These advanced statistical models are trained on historical run-to-failure datasets (synthetic or real). They estimate the probability of failure over time given a set of operating parameters and degradation states.
+*   **Mechanism:** Treats RUL estimation as a survival analysis problem ($\text{Probability of surviving until time } t$).
+*   **Advantage:** Statistically robust, provides a full probability distribution of RUL, and can account for varying failure rates.
 
-| Component | Scale (Score) | Ideal Value | Calculation Logic |
-| :--- | :--- | :--- | :--- |
-| **Residual ($\text{Score}_{Residual}$)** | $0-100$ | 0 | $\text{Score}_{Residual} = 100 \cdot \min\left(1, \frac{\sum (\text{Res}_i / \sigma_{i} / \text{MAL}_i)}{K}\right)$ where $\text{MAL}$ is the Max Allowable Limit. |
-| **Anomaly ($\text{Score}_{Anomaly}$)** | $0-100$ | 0 | Normalized output from ML model (e.g., $100 \cdot \text{Sigmoid}(\text{Anomaly\_Value})$). |
-| **Fault ($\text{Score}_{Fault}$)** | $0-100$ | 0 | $100 \cdot \max(P_{i})$ where $P_i$ are component probabilities (e.g., $P_{fault} = \max(P_{bearing}, P_{injector})$). |
-| **Degradation ($\text{Score}_{Degradation}$)** | $0-100$ | 0 | Exponentially weighted average of the degradation rate over time $t$: $\text{Rate} \cdot 100$. |
-
-### 3. Recommended Weights ($W_X$)
-Weights prioritize immediate, measurable faults over latent ones.
-*   $W_R$ (Residuals): 0.35
-*   $W_A$ (Anomaly): 0.25
-*   $W_F$ (Fault): 0.30
-*   $W_D$ (Degradation): 0.10
-*(Sum of weights: 1.00)*
-
-### 4. Smoothing and Filtering
-*   **Method:** Exponential Moving Average (EMA) is recommended for all inputs, particularly $\text{Score}_{Residual}$ and $\text{Score}_{Degradation}$, to prevent rapid, non-physical "jitter" in the HI.
-*   **Formula:** $\text{Score}_{smoothed}(t) = \alpha \cdot \text{Score}(t) + (1-\alpha) \cdot \text{Score}_{smoothed}(t-1)$.
-*   **Alpha ($\alpha$):** Should be set low (e.g., 0.1 to 0.3) for long-term trends (Degradation) and higher (e.g., 0.4 to 0.6) for immediate residuals that need faster reaction time.
-
-### 5. Handling Missing Sensors/Data Quality
-The $\text{Quality Factor}$ is a penalty multiplier (ranging from 0.8 to 1.0) applied to the final HI.
-*   **Mechanism:** If a critical sensor (e.g., EGT) confidence drops below $C_{threshold}$ (e.g., 0.7), the penalty is calculated.
-*   **Formula:** $\text{Quality Factor} = 1 - \sum_{s \in \text{Critical Sensors}} \max(0, (1 - \text{Confidence}_{s}) \cdot \text{Weight}_{s})$.
-*   **Effect:** A low data quality factor reduces the overall HI score, indicating that the result is unreliable.
+### Chosen Approach
+*   **Primary Approach (Hackathon):** **Synthetic Degradation-based RUL (Time-to-Threshold)**. This approach offers the best balance of fidelity and complexity for a hackathon. It is highly demonstrable, easy to integrate with existing degradation features, and yields a clear, interpretable time-to-failure estimate.
+*   **Fallback Approach:** **Time-to-Threshold Prediction using Sensor Trends**. This is chosen because it provides a necessary enhancement to the primary approach by validating the degradation state across multiple, inter-related sensor signals, adding depth without requiring a full survival analysis implementation.
 
 ---
 
-## ⚠️ Part C — Health Categories and Alerts
+## PART C — RUL Computation (Primary Approach: Synthetic Degradation)
 
-The final HI score dictates the operational state.
+### 1. Input Features
+The RUL calculation will rely on a combination of the following features:
+*   **Primary Degradation Level ($\text{D}_{\text{key}}$):** The core engineered degradation state (e.g., an Index of Wear calculated from component histories).
+*   **Key Residuals:** Time-varying residuals of critical sensor measurements (e.g., $Residual_{EGT} = EGT_{measured} - EGT_{baseline}$). High residuals indicate deviation from nominal performance.
+*   **Operating Stress History:** A vector summarizing mission severity metrics over the last $N$ missions (e.g., peak torque, total cycles, average temperature deviation).
 
-| Category | HI Range | Color Code | Alert Behavior | Recommended Operator Action |
-| :--- | :--- | :--- | :--- | :--- |
-| **Healthy** | $85 - 100$ | Green | No alerts. Normal monitoring. | Maintain current operation. Log key performance indicators. |
-| **Warning** | $70 - 84$ | Yellow | Low-priority alerts. Flag potential sub-system contributors. | Increase monitoring frequency. Review operational parameters against standard guidelines. Schedule preventative maintenance. |
-| **Critical** | $50 - 69$ | Orange | Medium-to-high priority alerts. Requires immediate operator attention. | **Reduce operational load** (e.g., reduce max throttle). Plan for service within the next operational window. Investigate contributing factors. |
-| **Emergency** | $< 50$ | Red | Critical system shutdown warning. Immediate, automated action required. | **Immediate reduction of power or engine shutdown** if decline continues. Isolate the faulty system component. |
+### 2. Output
+*   **RUL Value:** Remaining Useful Life in **Missions** (e.g., "42 missions").
+*   **Confidence Level:** A categorical or percentage estimate (e.g., "High Confidence").
+
+### 3. Algorithm (Simple Formula/Rule-Based)
+The RUL is calculated by first determining the degradation rate and then extrapolating to the failure threshold ($D_{crit}$).
+
+$$\text{RUL}_{\text{Missions}} = \left\lfloor \frac{D_{crit} - D_{\text{current}}}{\text{Average Degradation Rate}(\bar{D}_{\text{rate}})} \right\rfloor$$
+
+Where:
+*   $D_{crit}$: The predefined critical degradation value for the primary component.
+*   $D_{\text{current}}$: The current measured degradation value.
+*   $\bar{D}_{\text{rate}}$: The empirically calculated average degradation rate, derived from the last 5-10 missions' change in $D_{\text{key}}$.
+
+### 4. Confidence Estimation
+Confidence is estimated using a weighted metric combining three factors:
+$$\text{Confidence Score} = w_1 \cdot (\text{Data Quality}) + w_2 \cdot (\text{Trend Consistency}) + w_3 \cdot (\text{Component Redundancy})$$
+
+*   **Data Quality:** Based on the completeness and variance of input sensors (penalty if too many sensors are missing data).
+*   **Trend Consistency:** Measures the variance of $\bar{D}_{\text{rate}}$ over time. High variance suggests model instability, leading to lower confidence.
+*   **Component Redundancy:** A multiplier factor. If the degradation level is supported by multiple correlated sensor trends (i.e., not just one sensor peaking), confidence is increased.
 
 ---
 
-## 📝 Part D — Explanation Generation
+## PART D — RUL Display and Uncertainty
 
-The system must translate the raw score and underlying contributors into a clear, actionable narrative for the operator.
+RUL must be communicated clearly and non-ambiguously to maintain operational safety and trust in the system.
 
-### 1. Explanation Structure (The 'Why')
-The explanation must follow a structured format:
-1.  **Headline:** HI Score/Range and Alert Status (e.g., "HI: 71/100 (Warning)").
-2.  **Diagnosis:** Identification of the primary contributing factors (the "Main contributors").
-3.  **Detail:** Quantifiable metrics (e.g., "Injector fault probability: 0.68," "EGT residual elevated").
-4.  **Recommendation:** Specific, prioritized action (e.g., "inspect injector and lubrication system within next maintenance window").
+### Display Components
+1.  **Numeric Value:** The explicit RUL estimate (e.g., **42 operating missions**).
+2.  **Confidence:** A categorical rating (Low/Medium/High) derived from the Confidence Score.
+3.  **Trend:** A descriptor of the projected degradation trend over the coming period (Improving/Stable/Declining).
+4.  **Main Evidence:** A concise list of the top 2-3 sensor or degradation metrics contributing most significantly to the RUL estimate (e.g., "rising EGT residual," "falling oil pressure").
 
-### 2. Example Scenarios
+### Example Outputs
 
-**Scenario 1: Moderate Degradation (Warning)**
-*   **Inputs:** $\text{Score}_{Residual}$ (Medium), $\text{Score}_{Anomaly}$ (Low), $\text{Score}_{Fault}$ (Low), $\text{Score}_{Degradation}$ (High).
-*   **Explanation:** "Health Index: 78/100 (Warning). Main contributors: Sustained increase in Specific Fuel Consumption (SFC), suggesting overall engine inefficiency. Injector fault probability is currently low (0.15). Recommended action: Monitor SFC trend over the next 10 flight hours and prepare for efficiency-related maintenance."
+**Example 1: Stable Decline (High Confidence)**
+*   **RUL Estimate:** 110 operating missions
+*   **Confidence:** High
+*   **Trend:** Declining
+*   **Main Evidence:** Degradation index ($\text{D}_{\text{key}}$) rising steadily, Oil Pressure residual remaining stable.
+*   **Interpretation:** The engine is expected to fail after approximately 110 missions. The model is highly confident due to a consistent degradation rate across primary indicators.
 
-**Scenario 2: Acute Fault (Critical)**
-*   **Inputs:** $\text{Score}_{Residual}$ (High - EGT), $\text{Score}_{Anomaly}$ (High), $\text{Score}_{Fault}$ (High - Bearing), $\text{Score}_{Degradation}$ (Low).
-*   **Explanation:** "Health Index: 55/100 (Critical). Main contributors: Significantly elevated Exhaust Gas Temperature (EGT) residual, suggesting potential combustor fouling. Bearing degradation probability is rising rapidly (0.72). Recommended action: Reduce maximum allowable thrust immediately. Perform a full vibration and oil analysis upon landing, and plan for major component inspection."
+**Example 2: Rapid Deterioration (Medium Confidence)**
+*   **RUL Estimate:** 18 operating missions
+*   **Confidence:** Medium
+*   **Trend:** Rapidly Declining
+*   **Main Evidence:** Sharp increase in EGT residual, coupled with elevated vibration frequency in the tertiary bearing.
+*   **Interpretation:** Immediate maintenance is required, as the system detects rapid degradation. Confidence is medium because the vibration data is subject to environmental noise, warranting a physical inspection confirmation.
 
-**Scenario 3: Data Integrity Issue (Warning)**
-*   **Inputs:** All scores are low (Good), but $\text{Quality Factor}$ is low due to missing sensor data.
-*   **Explanation:** "Health Index: 82/100 (Warning). Warning: Data quality penalty applied due to intermittent Oil Pressure sensor data loss. While modeled components appear healthy, the true status is unverified. Recommended action: Do not rely on the HI score. Schedule a data diagnostic check for the Oil Pressure sensor."
+---
+
+## PART E — Limitations Statement
+
+> RUL estimates are based on synthetic degradation models and simplified physics. They are not validated on real aero piston engines and must not be used for actual maintenance decisions without further testing and domain expert validation.
