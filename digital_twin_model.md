@@ -1,125 +1,154 @@
-# Aero Piston Engine Digital Twin Model Design
+# Aero Piston Engine Digital Twin Model Specification
 
-This document outlines a simplified, physics-inspired model designed to compute expected sensor values for an aero piston engine. This model is intended *only* for demonstration, anomaly detection, and general health monitoring, and **is not a certified, flight-ready engine model.**
+This document outlines the design and expected-value calculation methods for a simplified, physics-inspired digital twin model of an aero piston engine.
 
-***
+**DISCLAIMER:** This model is intended purely for demonstration, anomaly detection, and educational purposes. It is **NOT** a certified engine model and should not be used for critical operational decision-making.
 
-## ⚙️ PART A — Modeling Assumptions
+## Part A — Modeling Assumptions
 
-To simplify the complexity of a real engine system, the following assumptions are made:
+The following assumptions are made to simplify the complex real-world physics of engine operation, allowing for the creation of a computationally tractable model.
 
-1.  **Steady-State Approximations:** The model assumes that the engine operates at steady-state conditions (e.g., constant altitude cruise) for the calculation of nominal parameters. Transient changes are handled by quasi-steady relationships.
-2.  **Quasi-Steady Relationships:** For dynamic phases like climb or descent, relationships are derived from quasi-steady assumptions, meaning the change in a state variable (like EGT) is modeled as a function of the current state and rate of change.
-3.  **Empirical Coefficients:** Many relationships rely on simplified, empirical coefficients (e.g., $\text{Coeff}_{EGT}$, $\text{Coeff}_{PF}$) tuned for synthetic data generation and feasibility in a proof-of-concept system.
-4.  **Purpose Limitation:** The model is explicitly for demonstration and anomaly detection/fault diagnosis (Digital Twin Lite) and must not be used for certification or critical flight operations.
+1.  **Steady-state approximations for cruise:** During steady-state flight conditions, major engine variables (e.g., pressure ratio, turbine temperature) are assumed to reach an equilibrium state, allowing simplified algebraic relationships.
+2.  **Quasi-steady relationships for climb/descent:** Changes in flight regime (climb or descent) are modeled using simplified first-order or piecewise functions that approximate the rate of change of key variables, rather than full thermodynamic cycle simulations.
+3.  **Empirical coefficients tuned for synthetic data:** Many relationships rely on empirically derived coefficients ($\beta$, $\gamma$, etc.) tuned against a synthetic data set representative of typical flight envelopes. These coefficients are constants for the scope of this model.
+4.  **Not a certified engine model:** The model intentionally bypasses the complexity and rigor required for certification, focusing solely on functional relationships for real-time anomaly detection and health monitoring.
 
-***
+---
 
-## 📐 PART B — Expected-Value Equations (Pseudocode & Formulas)
+## Part B — Expected-Value Equations (Simulation Equations)
 
-The following equations provide simplified, simplified representations for key sensor outputs.
+These equations provide simplified, expected relationships for core engine sensors. They are pseudocode/formulas and should be implemented in a language like Python.
 
 ### 1. Expected Exhaust Gas Temperature (EGT)
+EGT is generally proportional to the turbine inlet temperature and inversely related to flow conditions.
 
-EGT is fundamentally determined by the efficiency of combustion, which depends on the incoming air mass flow (related to Altitude and $\text{T}_{\text{ambient}}$) and the overall energy input (related to Throttle/Load).
+**Simplified Formula:**
+$$EGT_{exp} = f(\text{RPM}, \text{Throttle}, \rho, T_{amb}, \text{Load}) = C_1 \cdot \frac{\text{RPM} \cdot \text{Throttle} \cdot \text{Load}}{T_{amb} \cdot \rho} + C_{offset}$$
 
-**Formula (Simplified):**
-$$\text{EGT}_{\text{expected}} \approx \text{EGT}_{\text{base}} + \text{Coeff}_{\text{RPM}} \cdot \text{RPM} + \text{Coeff}_{\text{Throttle}} \cdot \text{Throttle} + \text{Coeff}_{\text{Altitude}} \cdot \left(1 - \frac{P_{\text{alt}}}{P_{\text{sea}}}\right) + \text{Noise}$$
+*   **Terms:**
+    *   $\text{RPM}$: Engine speed (proxy for power output).
+    *   $\text{Throttle}$: Normalized throttle setting (0 to 1).
+    *   $\rho$: Air density at altitude ($\text{Altitude}/\text{air density}$).
+    *   $T_{amb}$: Ambient temperature.
+    *   $\text{Load}$: Engine load factor (normalized).
+    *   $C_1, C_{offset}$: Empirically derived coefficients.
 
-**Explanation of Terms:**
-*   **$\text{EGT}_{\text{base}}$:** Baseline EGT at minimum power/idle (Empirical constant).
-*   **$\text{RPM}$:** Rotations per Minute (Directly influences rotational kinetic energy).
-*   **$\text{Throttle}$:** Engine load percentage (A primary indicator of commanded power).
-*   **$P_{\text{alt}} / P_{\text{sea}}$:** Altitude pressure ratio (Lower pressure increases engine efficiency per unit mass, impacting EGT).
-*   **$\text{Noise}$:** Stochastic/Process noise term (Typically Gaussian $\mathcal{N}(0, \sigma^2)$).
-
-**Degradation Impact:**
-*   **Failure/Degradation:** Fouling on the turbine blades or reduced fuel efficiency will cause the $\text{Coeff}_{\text{EGT}}$ to increase (or the $\text{EGT}_{\text{base}}$ to shift up) for a given power setting, leading to *higher* expected EGT.
+*   **Fault/Degradation:**
+    *   *Increased fuel flow or combustion issues:* $C_{offset}$ or $C_1$ may increase, leading to higher predicted EGT at constant operating points.
+    *   *Clogging/fouling:* The dependence on $\text{Throttle}$ might become non-linear or exhibit a negative offset, decreasing the expected EGT for a given throttle.
 
 ### 2. Expected Cylinder Head Temperature (CHT)
+CHT is primarily affected by the cooling airflow and operational history (EGT).
 
-CHT is primarily a function of cooling air flow and the core temperature, which is affected by the EGT and RPM.
+**Simplified Formula (Piecewise):**
+$$CHT_{exp} = f(\text{EGT}, \text{RPM}, \text{CoolFlow}, T_{amb}) = \text{max}(\text{base\_CHT}, \text{EGT} \cdot \text{CoolFlow} \cdot \gamma) + \text{correction}(T_{amb})$$
 
-**Formula (Pseudocode/Piecewise):**
-$$\text{CHT}_{\text{expected}} = \text{CHT}_{\text{base}} + \left( \frac{\text{EGT}_{\text{expected}}}{\text{Coeff}_{\text{CHT\_EGT}}} \right) \cdot \frac{1}{\text{CoolingAirFlow}} + \text{Corr}(\text{AmbientTemp}, \text{AirSpeed})$$
+*   **Terms:**
+    *   $\text{EGT}$: Expected EGT (input from Eq 1).
+    *   $\text{CoolFlow}$: Cooling airflow (function of airspeed and altitude).
+    *   $T_{amb}$: Ambient temperature.
+    *   $\gamma$: Cooling efficiency coefficient.
+    *   $\text{base\_CHT}$: Minimum operating temperature threshold.
 
-**Explanation of Terms:**
-*   **$\text{CHT}_{\text{base}}$:** Baseline CHT (Empirical constant).
-*   **$\text{EGT}_{\text{expected}}$:** Expected EGT (Used as a proxy for core temperature).
-*   **$\text{CoolingAirFlow}$:** Calculated function of $\text{AirSpeed}$ and $\text{Altitude}$ (Lower airflow increases heat soak).
-*   **$\text{Corr}(\dots)$:** Correction factor based on ambient conditions (e.g., lower ambient temperature might increase the temperature gradient).
+*   **Fault/Degradation:**
+    *   *Decreased $\text{CoolFlow}$ (clogging):* The $\text{CHT}_{exp}$ increases dramatically for a given set of inputs, predicting a high risk of overheating.
+    *   *Increased $\text{EGT}$:* Increases the temperature gradient, leading to higher predicted $\text{CHT}_{exp}$.
 
-**Degradation Impact:**
-*   **Failure/Degradation:** Partial blockage or reduced cooling airflow ($\text{CoolingAirFlow}$ decreases) due to component wear or debris will cause the expected CHT to *increase* significantly, even if EGT remains stable.
+### 3. Expected Oil Pressure ($P_{oil}$)
+Oil pressure depends on rotational speed and mechanical losses, which scale with speed.
 
-### 3. Expected Oil Pressure ($\text{OP}$)
+**Simplified Formula:**
+$$P_{oil\_exp} = f(\text{RPM}, T_{oil}, \text{Wear}) = P_{base} + K_1 \cdot \text{RPM} - K_2 \cdot (T_{oil} - T_{ref}) - K_3 \cdot \text{Wear}$$
 
-Oil pressure is dominated by rotational speed (RPM) and component lubrication state.
+*   **Terms:**
+    *   $P_{base}$: Base pressure (at zero RPM).
+    *   $\text{RPM}$: Engine speed.
+    *   $T_{oil}$: Measured oil temperature.
+    *   $\text{Wear}$: Engine degradation/wear factor (0 to 1).
+    *   $K_1, K_2, K_3$: Empirical constants.
 
-**Formula (Simplified):**
-$$\text{OP}_{\text{expected}} = \text{OP}_{\text{min}} + \text{Coeff}_{\text{RPM}} \cdot \text{RPM} - \text{Coeff}_{\text{OilTemp}} \cdot (\text{OilTemp} - \text{T}_{\text{ref}}) - \text{Coeff}_{\text{Wear}} \cdot \text{WearFactor}$$
-
-**Explanation of Terms:**
-*   **$\text{OP}_{\text{min}}$:** Minimum baseline oil pressure at idle.
-*   **$\text{RPM}$:** Rotations per Minute (Increases pressure due to higher mechanical load).
-*   **$\text{OilTemp}$:** Oil Temperature (Higher temperature lowers oil viscosity, thus lowering pressure).
-*   **$\text{WearFactor}$:** An integrated measure of engine wear (e.g., piston ring clearance increase).
-
-**Degradation Impact:**
-*   **Failure/Degradation:** Increased wear ($\text{WearFactor}$ increases) will cause the expected $\text{OP}$ to decrease over time, potentially dropping below the minimum safe operating pressure, even at nominal RPMs.
+*   **Fault/Degradation:**
+    *   *Seal degradation or increased wear:* $\text{Wear}$ increases, causing $P_{oil\_exp}$ to decrease faster than expected for the given RPM.
+    *   *Low oil viscosity/temperature:* If $T_{oil}$ deviates from $T_{ref}$, $P_{oil\_exp}$ will be altered by the temperature correction term.
 
 ### 4. Expected Fuel Flow ($\text{FF}$)
+Fuel flow is directly tied to engine thrust and efficiency factors.
 
-Fuel flow is primarily driven by the power required, modeled by a relationship with RPM and Throttle, scaled by atmospheric density.
+**Simplified Formula:**
+$$\text{FF}_{exp} = f(\text{RPM}, \text{Throttle}, \text{Altitude}, \text{Efficiency}) = C_2 \cdot \text{RPM} \cdot \text{Throttle} \cdot \text{Altitude\_factor} / \text{Efficiency}$$
 
-**Formula (Simplified):**
-$$\text{FF}_{\text{expected}} \approx \text{FF}_{\text{idle}} + \text{Coeff}_{\text{P}} \cdot \text{Power} \cdot \text{AltitudeDensityFactor}$$
-Where $\text{Power} \approx \text{RPM} \cdot \text{Throttle}$.
+*   **Terms:**
+    *   $C_2$: Overall conversion efficiency constant.
+    *   $\text{RPM}$: Engine speed.
+    *   $\text{Throttle}$: Normalized throttle setting.
+    *   $\text{Altitude\_factor}$: Factor accounting for air density changes.
+    *   $\text{Efficiency}$: Engine efficiency factor (0 to 1).
 
-**Explanation of Terms:**
-*   **$\text{FF}_{\text{idle}}$:** Idle fuel flow (Base consumption).
-*   **$\text{Power}$:** Proxy for demanded power ($\text{RPM} \cdot \text{Throttle}$).
-*   **$\text{AltitudeDensityFactor}$:** Scaling factor based on air density (less dense air requires more fuel energy per unit mass flow, but the overall relationship is complex, modeled simply here).
+*   **Fault/Degradation:**
+    *   *Decreased combustion efficiency:* $\text{Efficiency}$ decreases, requiring a higher $\text{FF}_{exp}$ to maintain the same $\text{RPM}$/$\text{Throttle}$ setting, which may lead to an actual fuel-flow/thrust mismatch.
+    *   *Fuel system leak:* The relationship becomes unstable, causing $\text{FF}_{exp}$ to be consistently higher than expected for the observed $\text{RPM}$/$\text{Throttle}$.
 
-**Degradation Impact:**
-*   **Failure/Degradation:** Reduced combustion efficiency (due to fouling or injectors) will cause the $\text{FF}$ to *increase* relative to the expected power output for a given $\text{RPM}$ and $\text{Throttle}$.
+### 5. Expected Vibration RMS ($\text{Vib}_{exp}$)
+Vibration is sensitive to speed imbalances and combustion quality.
 
-### 5. Expected Vibration RMS
+**Simplified Formula:**
+$$\text{Vib}_{exp} = f(\text{RPM}, \text{Load}, \text{CombustionQuality}, \text{Degr}) = C_3 \cdot \text{RPM}^{2} \cdot \text{Load} \cdot (1 + D \cdot \text{CombustionQuality}) + \text{Vib\_base}$$
 
-Vibration Root Mean Square (RMS) is highly sensitive to rotational imbalances and combustion irregularities.
+*   **Terms:**
+    *   $C_3$: Vibration scaling constant.
+    *   $\text{RPM}$: Engine speed (square dependence).
+    *   $\text{Load}$: Engine load factor.
+    *   $\text{CombustionQuality}$: Indicator derived from stoichiometry or knock sensors.
+    *   $\text{Degr}$: Overall engine degradation factor (0 to 1).
+    *   $\text{Vib\_base}$: Baseline vibration.
 
-**Formula (Pseudocode/Piecewise):**
-$$\text{Vibe}_{\text{expected}} = \text{Vibe}_{\text{idle}} + \text{Coeff}_{\text{Load}} \cdot \text{Load}^{2} + \text{Coeff}_{\text{Combustion}} \cdot \text{CombustionQuality}$$
+*   **Fault/Degradation:**
+    *   *Rotor imbalance/mechanical failure:* The dependence on $\text{RPM}^2$ becomes disproportionately large, showing a sharp, non-linear increase in $\text{Vib}_{exp}$ at operational speeds.
+    *   *Poor combustion:* If $\text{CombustionQuality}$ drops, the predicted $\text{Vib}_{exp}$ increases due to increased cyclic stress.
 
-**Explanation of Terms:**
-*   **$\text{Vibe}_{\text{idle}}$:** Baseline vibration at idle.
-*   **$\text{Load}$:** Engine Load (Vibration scales non-linearly with power output).
-*   **$\text{CombustionQuality}$:** Indicator of flame stability and combustion completeness (Poor combustion increases harmonic vibration).
+---
 
-**Degradation Impact:**
-*   **Failure/Degradation:** Changes in engine balance (imbalance mass or bearing wear) increase the constant base vibration ($\text{Vibe}_{\text{idle}}$ increase). Decreased combustion quality (e.g., fouled injectors) increases the $\text{CombustionQuality}$ term, leading to higher $\text{Vibe}_{\text{expected}}$.
+## Part C — Residual Calculation and Usage
 
-***
+The digital twin relies on calculating the difference between the observed sensor reading ($\text{Observed}$) and the model's prediction ($\text{Expected}$).
 
-## 📊 PART C — Residual Calculation
+### Definitions:
+1.  **Residual ($R$):** The raw difference between the observed reading and the expected reading.
+    $$R = \text{Observed} - \text{Expected}$$
+2.  **Normalized Residual ($R_{norm}$):** The residual normalized by the expected operating range (the expected range of the sensor during normal operation, $\text{ExpectedRange}$). This allows residuals from different sensors (e.g., EGT in K vs. Oil Pressure in PSI) to be compared dimensionlessly.
+    $$R_{norm} = \frac{R}{\text{ExpectedRange}}$$
 
-### 1. Definitions
-*   **Residual ($\text{R}$):** The raw deviation between what was measured and what was expected.
-    $$\text{R}_{\text{EGT}} = \text{EGT}_{\text{observed}} - \text{EGT}_{\text{expected}}$$
-*   **Normalized Residual ($\text{R}_{\text{norm}}$):** The raw residual normalized by the expected operational range, providing a unitless indicator of magnitude.
-    $$\text{R}_{\text{norm}} = \frac{\text{R}_{\text{observed}}}{\text{ExpectedRange}}$$
-    (Example: $\text{ExpectedRange}$ for EGT might be $[800^{\circ}\text{C}, 1200^{\circ}\text{C}]$).
+### Combined Metrics:
+A combined health metric, such as the Root Mean Square (RMS) of the key residuals, provides a single, aggregated indicator of engine health.
 
-### 2. Combined Metrics
-A single, comprehensive metric, such as the Root Mean Square (RMS) of the normalized residuals for the key parameters, can be used:
+$$\text{HealthIndex} = \sqrt{\sum_{i=1}^{N} (R_{norm, i})^2 \cdot W_i}$$
+Where $N$ is the number of monitored sensors, and $W_i$ are sensor-specific weighting factors (e.g., weighting EGT higher than $P_{oil}$ if EGT is more critical).
 
-$$\text{HealthIndex} = \sqrt{\frac{1}{N} \sum_{i=1}^{N} (\text{R}_{\text{norm}, i})^2}$$
-*Where $N$ is the number of key monitored parameters.*
+### Usage in Anomaly Detection and Fault Diagnosis:
 
-### 3. Usage of Residuals
+*   **Anomaly Detection:** The system monitors the magnitude and temporal pattern of $R_{norm}$. A sudden, sustained spike in $R_{norm}$ (e.g., $R_{norm} > 3\sigma$ where $\sigma$ is the expected standard deviation) signals an immediate anomaly, indicating a physical state the model cannot explain.
+*   **Fault Diagnosis:** Specific residual patterns map to known failure modes:
+    *   $\text{High } R_{norm} \text{ for } P_{oil}$ vs. $\text{Low } \text{RPM}$: Suggests a potential seal failure or lubrication issue.
+    *   $\text{High } R_{norm} \text{ for } \text{CHT}$ that correlates with $\text{Low CoolFlow}$: Indicates fouling or blockage in the cooling system.
+    *   Systematic increase in $\text{HealthIndex}$ over time: Suggests gradual engine degradation (e.g., turbine blade erosion, increased friction).
+*   **Health Index Computation:** The $\text{HealthIndex}$ provides a single score that trends over time. A downward trend indicates declining engine health, allowing for proactive maintenance scheduling.
 
-| Application | Detection Method | Interpretation |
-| :--- | :--- | :--- |
-| **Anomaly Detection** | Detect sudden, large spikes or dips in $\text{R}_{\text{norm}}$. | Large deviations (outside $\text{Mean} \pm 3\sigma$) suggest an unexpected operational event (e.g., foreign object damage, sudden altitude change). |
-| **Fault Diagnosis** | Monitor the *pattern* of elevated residuals across multiple parameters. | A persistently high $\text{R}_{\text{norm}}$ for $\text{OP}$ combined with a high $\text{R}_{\text{norm}}$ for $\text{CHT}$ points toward specific component failure (e.g., degraded lubrication, cooling system fault). |
-| **Health Index Computation** | Track the trend of the $\text{HealthIndex}$ over time. | A steadily increasing $\text{HealthIndex}$ indicates systemic degradation (e.g., cumulative engine wear, fouling), signaling preventative maintenance is required before hard failure. |
+This model provides a comprehensive, simplified framework for digital twin development.
+</write_to_file>
+<task_progress>
+- [x] Set up task structure and initial documentation in digital_twin_model.md
+- [ ] Define core functional equations (Part B)
+- [ ] Define residual calculation and usage (Part C)
+- [ ] Finalize and complete the document
+</task_progress>
+</task_progress>
+<execute_command>
+<command>echo "Initial task progress checklist updated."</command>
+<requires_approval>false</requires_approval>
+</execute_command>
+<task_progress>
+- [x] Set up task structure and initial documentation in digital_twin_model.md
+- [ ] Define core functional equations (Part B)
+- [ ] Define residual calculation and usage (Part C)
+- [ ] Finalize and complete the document
+</task_progress>
