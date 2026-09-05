@@ -1,35 +1,87 @@
-# SIH26054 Aero Piston Engine Digital Twin
+# SIH26054: AI-Enabled Digital Twin for Aero Piston Engines
 
-This repository hosts the complete architecture and implementation components for the SIH26054 Digital Twin project. The system models, simulates, and predicts the performance, health, and potential failure modes of an aero piston engine in real-time.
+An AI-powered real-time digital twin system for monitoring, predicting faults, and enhancing mission reliability of Aero Piston Engines used in MALE UAVs.
 
-## 🚀 Architecture Overview
+## 🚀 Problem Statement
 
-The digital twin is structured as a microservices-oriented monorepo, separating core concerns:
-- **`backend/`**: Handles API routing, business logic, and interaction with the database.
-- **`simulator/`**: Contains the core physics and operational models (e.g., engine performance curves, mission profiles, fault injection logic).
-- **`ml/`**: Houses machine learning pipelines for anomaly detection, Remaining Useful Life (RUL) prediction, and fault classification.
-- **`frontend/`**: Provides the user interface for real-time monitoring, dashboard display, and historical report viewing.
-- **`data/`**: Stores static data models and configuration files.
-- **`docs/`**: Contains architectural documentation and model specifications.
+Maintaining optimal operational status of aero engines in MALE UAVs is critical for mission success. Failures or degradation can severely compromise flight safety and mission completion. We provide a comprehensive digital twin solution to monitor engine health in real-time, predict potential faults, and enhance overall mission reliability using AI.
 
-## 💾 Database Schema (Part A)
+## 🛠 Tech Stack
 
-The relational database models the entire lifecycle of the engine, from initial deployment through operation and eventual decommissioning.
-[Detailed schema design is provided in `docs/architecture.md`.]
+- __Backend:__ FastAPI (Python)
+- __Frontend:__ React (JavaScript)
+- __Database:__ SQLite (Local persistence, for simplicity)
+- __ML/AI:__ Scikit-learn, TensorFlow/PyTorch (Python)
+- __Simulator:__ Python/NumPy (Simulates engine telemetry)
+- __Communication:__ WebSockets (Real-time data streaming)
 
-## <0xF0><0x9F><0x97><0x84>️ Core Data Model Principles
+## ⚙️ System Architecture (Conceptual)
 
-The database is designed to track:
-1.  **Engine Identity**: `engines`
-2.  **Operational Context**: `missions`, `telemetry`
-3.  **System Health**: `twin_states`, `anomalies`, `fault_predictions`, `rul_predictions`
-4.  **Management**: `maintenance_advisories`, `mission_reports`, `fault_injections`
-5.  **Versioning**: `model_versions`, `system_events`
+The system operates as a closed loop: The __Simulator__ generates realistic telemetry (including fault injection). The __Backend__ receives this data via WebSockets, processes it using the __ML Models__ (Anomaly Detection, RUL), and stores the processed state/Health Index in the __SQLite__ database. The __Frontend__ consumes the real-time state and historical data to display the Digital Twin Dashboard.
 
-## ⚙️ Getting Started
+## 💡 Getting Started
 
-1.  **Setup Environment**: Clone the repository and install dependencies (e.g., `pip install -r backend/requirements.txt`).
-2.  **Run Migration**: Initialize the database and run migrations: `python backend/main.py migrate`.
-3.  **Start Services**: Start the backend API and the frontend development server.
-    - `python backend/main.py start`
-    - `npm run dev` (in the frontend directory)
+### 1. Prerequisites
+
+Ensure you have Python (3.8+) and Node.js/npm installed.
+
+```bash
+pip install -r backend/requirements.txt
+npm install # in frontend/
+```
+
+### 2. Running Components
+
+__🌐 Start Backend API (Python/FastAPI)__ The backend manages data ingestion, ML calls, and WebSocket connections.
+
+```bash
+uvicorn backend.main:app --reload --port 8000
+# (Logs show API listening on http://localhost:8000)
+```
+
+__🖥️ Start Frontend Dashboard (React)__ The frontend consumes the real-time data stream from the backend.
+
+```bash
+cd frontend
+npm run dev
+# (Dashboard should open in your browser, e.g., http://localhost:3000)
+```
+
+__🛰️ Run Simulator (Python)__ The simulator generates synthetic telemetry and pushes it to the backend WebSocket endpoint.
+
+```bash
+python simulator/run_simulation.py --profile mission_profile_A
+# The simulator runs independently and sends data to the backend.
+```
+
+__🔬 ML Training (For Retraining/Testing)__ Run this command to train or validate the core ML models (e.g., Anomaly Detection or RUL).
+
+```bash
+python ml/train_rul.py --data data/training_set.csv --model_type anomaly
+```
+
+### 3. Data Generation & Synthetic Simulation
+
+Synthetic data is generated and managed within the `simulator/` and `data/` folders.
+
+- __Simulation:__ Use `python simulator/run_simulation.py`. This simulates the entire operational cycle, including fault injection based on predefined mission profiles.
+- __Data Preparation:__ For initial model testing, raw data and pre-processed feature sets are located in the `data/` directory.
+
+### 4. Running a Full Demo Cycle
+
+To run a complete, end-to-end demonstration:
+
+1. __Start Backend:__ Open Terminal 1 and run `uvicorn backend.main:app --reload --port 8000`.
+2. __Start Frontend:__ Open Terminal 2 and run `cd frontend && npm run dev`.
+3. __Start Simulation:__ Open Terminal 3 and run `python simulator/run_simulation.py --profile mission_profile_A`.
+4. __Observe:__ The dashboard (Terminal 2) will update in real-time with simulated engine parameters, health indices, and predicted faults streaming from the backend (Terminal 1), driven by the simulator (Terminal 3).
+
+## 📚 Resources & Contracts
+
+- __Architecture Diagram:__ `docs/architecture.md` (Detailed system flow and component interactions).
+- __API Contract:__ `docs/api_contract.md` (Swagger/OpenAPI specification reference for all FastAPI endpoints and WebSocket message formats).
+- __Code Implementation:__ The source code resides in `backend/`, `frontend/`, `ml/`, and `simulator/`.
+
+---
+
+*Disclaimer: This prototype uses realistic synthetic telemetry data and does not claim flight certification or real-engine validation.*
