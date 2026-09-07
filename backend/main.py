@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from backend.api.routes_system import router as system_router
 from backend.api.routes_telemetry import router as telemetry_router
 from backend.api.routes_control import router as control_router
-from backend.config import APP_NAME, APP_VERSION, DEBUG, HOST, PORT
+from backend.config import ALLOWED_ORIGINS, APP_NAME, APP_VERSION, DEBUG, HOST, PORT
 from backend.db.database import create_all_tables
 from backend.websocket.server import router as websocket_router
 
@@ -31,8 +31,8 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title=APP_NAME, version=APP_VERSION, debug=DEBUG, lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=ALLOWED_ORIGINS,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )

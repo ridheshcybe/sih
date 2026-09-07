@@ -23,7 +23,7 @@ class MissionStatus(str, Enum):
 class Engine(Base):
     __tablename__ = "engines"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(String, primary_key=True, index=True)
     name = Column(String, nullable=False, unique=True)
     status = Column(String, default=EngineStatus.ONLINE.value)
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
@@ -34,8 +34,8 @@ class Engine(Base):
 class Mission(Base):
     __tablename__ = "missions"
 
-    id = Column(Integer, primary_key=True, index=True)
-    engine_id = Column(Integer, ForeignKey("engines.id"), nullable=False, index=True)
+    id = Column(String, primary_key=True, index=True)
+    engine_id = Column(String, ForeignKey("engines.id"), nullable=False, index=True)
     profile_id = Column(String, nullable=False)
     start_time = Column(DateTime, default=datetime.utcnow, index=True)
     end_time = Column(DateTime, nullable=True)
@@ -53,8 +53,8 @@ class Telemetry(Base):
     __tablename__ = "telemetry"
 
     id = Column(Integer, primary_key=True, index=True)
-    engine_id = Column(Integer, ForeignKey("engines.id"), nullable=False, index=True)
-    mission_id = Column(Integer, ForeignKey("missions.id"), nullable=False, index=True)
+    engine_id = Column(String, ForeignKey("engines.id"), nullable=False, index=True)
+    mission_id = Column(String, ForeignKey("missions.id"), nullable=False, index=True)
     timestamp = Column(DateTime, nullable=False, index=True)
 
     rpm = Column(Float, nullable=False)
@@ -81,7 +81,7 @@ class TwinState(Base):
     __tablename__ = "twin_states"
 
     id = Column(Integer, primary_key=True, index=True)
-    mission_id = Column(Integer, ForeignKey("missions.id"), nullable=False, index=True)
+    mission_id = Column(String, ForeignKey("missions.id"), nullable=False, index=True)
     timestamp = Column(DateTime, nullable=False, index=True)
     expected_sensors_json = Column(JSON, nullable=False)
     residuals_json = Column(JSON, nullable=False)
@@ -98,7 +98,7 @@ class FaultPrediction(Base):
     __tablename__ = "fault_predictions"
 
     id = Column(Integer, primary_key=True, index=True)
-    mission_id = Column(Integer, ForeignKey("missions.id"), nullable=False, index=True)
+    mission_id = Column(String, ForeignKey("missions.id"), nullable=False, index=True)
     timestamp = Column(DateTime, nullable=False, index=True)
     fault_type = Column(String, nullable=False)
     probability = Column(Float, nullable=False)
@@ -111,7 +111,7 @@ class MaintenanceAdvisory(Base):
     __tablename__ = "maintenance_advisories"
 
     id = Column(Integer, primary_key=True, index=True)
-    mission_id = Column(Integer, ForeignKey("missions.id"), nullable=False, index=True)
+    mission_id = Column(String, ForeignKey("missions.id"), nullable=False, index=True)
     timestamp = Column(DateTime, nullable=False, index=True)
     advisory_text = Column(String, nullable=False)
     priority = Column(String, nullable=False)
@@ -123,7 +123,7 @@ class MissionReport(Base):
     __tablename__ = "mission_reports"
 
     id = Column(Integer, primary_key=True, index=True)
-    mission_id = Column(Integer, ForeignKey("missions.id"), nullable=False, index=True)
+    mission_id = Column(String, ForeignKey("missions.id"), nullable=False, index=True)
     summary_json = Column(JSON, nullable=False)
     generated_at = Column(DateTime, default=datetime.utcnow, index=True)
 

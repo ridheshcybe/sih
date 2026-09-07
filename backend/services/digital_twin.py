@@ -207,7 +207,7 @@ def update_twin_state(mission_id, telemetry_row, engine_id: Optional[str] = None
 
         db = SessionLocal()
         state_record = TwinState(
-            mission_id=int(mission_id),
+            mission_id=str(mission_id),
             timestamp=datetime.utcnow(),
             expected_sensors_json=expected,
             residuals_json=residuals,

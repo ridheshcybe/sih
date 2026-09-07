@@ -13,8 +13,8 @@ def _as_bool(value: str, default: str = "false") -> bool:
 
 APP_NAME = "Digital Twin API"
 APP_VERSION = "1.0.0"
-DEBUG = _as_bool(os.getenv("TWIN_DEBUG", "true"))
-HOST = os.getenv("TWIN_HOST", "0.0.0.0")
+DEBUG = _as_bool(os.getenv("TWIN_DEBUG", "false"))
+HOST = os.getenv("TWIN_HOST", "127.0.0.1")
 PORT = int(os.getenv("TWIN_PORT", "8000"))
 
 DATABASE_URL = os.getenv(
@@ -38,4 +38,6 @@ settings = SimpleNamespace(
     WS_MAX_MSG_PER_SEC=WS_MAX_MSG_PER_SEC,
     WS_QUEUE_MODE=WS_QUEUE_MODE,
 )
+
+ALLOWED_ORIGINS = [origin.strip() for origin in os.getenv("TWIN_ALLOWED_ORIGINS", "http://localhost:3000").split(",") if origin.strip()]
 

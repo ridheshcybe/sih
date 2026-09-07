@@ -27,7 +27,7 @@ Ensure you have Python (3.8+) and Node.js/npm installed.
 
 ```bash
 pip install -r backend/requirements.txt
-npm install # in frontend/
+npm install # in backend-app/
 ```
 
 ### 2. Running Components
@@ -42,7 +42,7 @@ uvicorn backend.main:app --reload --port 8000
 __🖥️ Start Frontend Dashboard (React)__ The frontend consumes the real-time data stream from the backend.
 
 ```bash
-cd frontend
+cd backend-app
 npm run dev
 # (Dashboard should open in your browser, e.g., http://localhost:3000)
 ```
@@ -50,14 +50,14 @@ npm run dev
 __🛰️ Run Simulator (Python)__ The simulator generates synthetic telemetry and pushes it to the backend WebSocket endpoint.
 
 ```bash
-python simulator/run_simulation.py --profile mission_profile_A
-# The simulator runs independently and sends data to the backend.
+python -m simulator.run_simulation
+# Generates synthetic mission datasets. The dashboard demo loop is started from the UI.
 ```
 
 __🔬 ML Training (For Retraining/Testing)__ Run this command to train or validate the core ML models (e.g., Anomaly Detection or RUL).
 
 ```bash
-python ml/train_rul.py --data data/training_set.csv --model_type anomaly
+python ml/train_all_models.py
 ```
 
 ### 3. Data Generation & Synthetic Simulation
@@ -72,15 +72,15 @@ Synthetic data is generated and managed within the `simulator/` and `data/` fold
 To run a complete, end-to-end demonstration:
 
 1. __Start Backend:__ Open Terminal 1 and run `uvicorn backend.main:app --reload --port 8000`.
-2. __Start Frontend:__ Open Terminal 2 and run `cd frontend && npm run dev`.
-3. __Start Simulation:__ Open Terminal 3 and run `python simulator/run_simulation.py --profile mission_profile_A`.
-4. __Observe:__ The dashboard (Terminal 2) will update in real-time with simulated engine parameters, health indices, and predicted faults streaming from the backend (Terminal 1), driven by the simulator (Terminal 3).
+2. __Start Frontend:__ Open Terminal 2 and run `cd backend-app && npm run dev`.
+3. __Start Mission:__ Open `http://localhost:3000` and click `Start Mission`.
+4. __Observe:__ The dashboard updates with synthetic telemetry, Health Index, fault effects, and WebSocket status.
 
 ## 📚 Resources & Contracts
 
 - __Architecture Diagram:__ `docs/architecture.md` (Detailed system flow and component interactions).
 - __API Contract:__ `docs/api_contract.md` (Swagger/OpenAPI specification reference for all FastAPI endpoints and WebSocket message formats).
-- __Code Implementation:__ The source code resides in `backend/`, `frontend/`, `ml/`, and `simulator/`.
+- __Code Implementation:__ The source code resides in `backend/`, `backend-app/`, `ml/`, and `simulator/`.
 
 ---
 

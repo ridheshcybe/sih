@@ -27,7 +27,7 @@ export default function EngineMonitor() {
     let active = true;
     Promise.all([getEngineState(ENGINE_ID), getEngineTelemetry(ENGINE_ID)]).then(([nextState, nextTelemetry]) => {
       if (!active) return;
-      if (!nextState || !nextTelemetry) return setError("Backend unavailable - check connection");
+      if (!nextState || nextState.error || !nextTelemetry || nextTelemetry.error) return setError(nextState?.error || nextTelemetry?.error || "Backend unavailable - check connection");
       setState(nextState);
       setTelemetry(nextTelemetry.data || nextTelemetry.data_points || []);
       setError("");

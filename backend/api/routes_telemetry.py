@@ -4,6 +4,7 @@ import logging
 from typing import Any, Dict, List, Union
 
 from fastapi import APIRouter, HTTPException
+from backend.config import TELEMETRY_BATCH_LIMIT
 
 try:
     from backend.services.digital_twin import update_twin_state
@@ -26,6 +27,8 @@ async def ingest_telemetry(payload: Union[Dict[str, Any], List[Dict[str, Any]]])
     if isinstance(payload, list):
         if not payload:
             return {"status": "error", "inserted": 0, "message": "Empty batch received."}
+        if len(payload) > TELEMETRY_BATCH_LIMIT:
+            raise HTTPException(status_code=413, detail=f"Batch exceeds limit of {TELEMETRY_BATCH_LIMIT} rows.")
 
         inserted = []
         for row in payload:

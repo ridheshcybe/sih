@@ -1,3 +1,61 @@
+# SIH26054 API Contract
+
+The prototype uses synthetic telemetry and is not flight-certified or validated against real engine data.
+
+## Base paths
+
+- REST: `http://localhost:8000/api`
+- WebSocket: `ws://localhost:8000/ws/telemetry/{engine_id}`
+
+## REST endpoints
+
+### `GET /engines/{engine_id}/state`
+
+Returns the latest in-memory twin state:
+
+```json
+{
+    "engine_id": "ENG-001",
+    "status": "OPERATIONAL",
+    "health_index": 96.0,
+    "anomaly_score": 0.04,
+    "sensors": {"rpm": 2450, "cht": 168, "egt": 610, "oil_pressure": 46},
+    "fault_probs": {}
+}
+```
+
+Health Index is normalized from `0` to `100`; status is `OPERATIONAL`, `WARNING`, or `CRITICAL`.
+
+### `GET /engines/{engine_id}/telemetry`
+
+Returns the latest buffered telemetry as `{ "engine_id": string, "data": array }`. Each row includes timestamp, engine/mission IDs, core sensors, electrical sensors, and altitude.
+
+### `POST /missions/start`
+
+Request: `{ "engine_id": "ENG-001", "profile_id": "normal_cruise" }`.
+Returns a mission object containing `mission_id`, `engine_id`, `profile_id`, `status`, and buffered telemetry.
+
+### `POST /missions/stop`
+
+Request: `{ "mission_id": "uuid" }`. Marks the mission complete and stops its demo loop.
+
+### `POST /faults/inject`
+
+Request: `{ "engine_id": "ENG-001", "fault_type": "overheating", "severity": 0.7, "start_time": null }`.
+Supported fault types are `injector_degradation`, `lubrication_issue`, `overheating`, `sensor_drift`, `abnormal_vibration`, and `battery_alternator_degradation`.
+
+### `POST /telemetry/ingest`
+
+Accepts one telemetry object or a list up to `TWIN_BATCH_LIMIT` rows. Rows use string `engine_id` and `mission_id` values and require timestamp, core sensor, battery, and alternator fields.
+
+## WebSocket events
+
+Connect to `/ws/telemetry/{engine_id}`. Messages use `{ "event": string, "payload": object }`.
+
+- `telemetry_update`: one raw telemetry row.
+- `twin_state_update`: latest Health Index, anomaly score, status, sensors, and fault probabilities.
+
+The frontend retries disconnected sockets up to three times with a three-second delay.
 # API Contract: SIH26054 Digital Twin Backend
 
 This document defines the RESTful API endpoints and WebSocket message contracts for the FastAPI backend, ensuring clear communication between the frontend, simulator, and ML services.

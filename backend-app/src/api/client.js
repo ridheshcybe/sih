@@ -6,11 +6,14 @@ async function request(path, options = {}) {
       headers: { "Content-Type": "application/json" },
       ...options,
     });
-    if (!response.ok) throw new Error(`API request failed: ${response.status}`);
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.detail || `API request failed: ${response.status}`);
+    }
     return await response.json();
   } catch (error) {
     console.error(error);
-    return null;
+    return { error: error.message || "Request failed" };
   }
 }
 

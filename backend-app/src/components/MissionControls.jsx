@@ -10,6 +10,7 @@ export default function MissionControls({ engineId, mission, onMissionChange, no
     const result = await startMission(engineId, "normal_cruise");
     setBusy(false);
     if (!result) return notify("Failed to start mission", "error");
+      if (!result || result.error) return notify(result?.error || "Failed to start mission", "error");
     onMissionChange(result);
     notify("Mission started successfully", "success");
   };
@@ -19,6 +20,7 @@ export default function MissionControls({ engineId, mission, onMissionChange, no
     const result = await stopMission(mission.mission_id);
     setBusy(false);
     if (!result) return notify("Failed to stop mission", "error");
+      if (!result || result.error) return notify(result?.error || "Failed to stop mission", "error");
     onMissionChange(result);
     notify("Mission stopped", "success");
   };

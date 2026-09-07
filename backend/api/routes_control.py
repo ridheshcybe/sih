@@ -11,12 +11,19 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from backend.websocket.server import connection_manager
+from backend.db.database import SessionLocal
+from backend.db.models import Engine, Mission, Telemetry
+from backend.services.telemetry_ingest import ingest_telemetry_row
 
 router = APIRouter(prefix="/api", tags=["demo-control"])
 
 _missions: Dict[str, Dict[str, Any]] = {}
 _engine_state: Dict[str, Dict[str, Any]] = {}
 _tasks: Dict[str, asyncio.Task] = {}
+ALLOWED_FAULTS = {
+    "injector_degradation", "lubrication_issue", "overheating", "sensor_drift",
+    "abnormal_vibration", "battery_alternator_degradation",
+}
 
 
 class StartMissionRequest(BaseModel):
@@ -88,9 +95,14 @@ async def _mission_loop(mission_id: str, engine_id: str) -> None:
         health = max(20, min(100, 98 - anomaly * 34))
         status = "CRITICAL" if health < 55 else "WARNING" if health < 80 else "OPERATIONAL"
         state.update({"health_index": round(health, 1), "anomaly_score": round(anomaly, 3), "status": status, "timestamp": datetime.now(timezone.utc).isoformat()})
-        row = {"engine_id": engine_id, "mission_id": mission_id, "timestamp": state["timestamp"], **sensors}
+        row = {
+            "engine_id": engine_id, "mission_id": mission_id, "timestamp": state["timestamp"],
+            "battery_voltage": round(27.5 - sensors["rpm"] / 10000, 2),
+            "alternator_current": round(10 + sensors["rpm"] / 1000, 2), **sensors,
+        }
         _missions[mission_id].setdefault("telemetry", []).append(row)
         _missions[mission_id]["telemetry"] = _missions[mission_id]["telemetry"][-120:]
+        ingest_telemetry_row(row)
         await _publish(engine_id, "telemetry_update", row)
         await _publish(engine_id, "twin_state_update", {k: state[k] for k in ("engine_id", "timestamp", "health_index", "anomaly_score", "sensors", "status", "fault_probs")})
         await asyncio.sleep(1)
@@ -103,8 +115,20 @@ async def get_engine_state(engine_id: str):
 
 @router.get("/engines/{engine_id}/telemetry")
 async def get_engine_telemetry(engine_id: str):
-    mission = next((item for item in _missions.values() if item["engine_id"] == engine_id and item["status"] == "running"), None)
-    return {"engine_id": engine_id, "data": mission.get("telemetry", []) if mission else []}
+    db = SessionLocal()
+    try:
+        rows = db.query(Telemetry).filter(Telemetry.engine_id == engine_id).order_by(Telemetry.timestamp.desc()).limit(120).all()
+        data = []
+        for row in reversed(rows):
+            data.append({
+                "engine_id": row.engine_id, "mission_id": row.mission_id, "timestamp": row.timestamp.isoformat(),
+                "rpm": row.rpm, "cht": row.cht, "egt": row.egt, "oil_pressure": row.oil_pressure,
+                "oil_temperature": row.oil_temperature, "fuel_flow": row.fuel_flow, "vibration_rms": row.vibration_rms,
+                "battery_voltage": row.battery_voltage, "alternator_current": row.alternator_current, "altitude": row.altitude,
+            })
+        return {"engine_id": engine_id, "data": data}
+    finally:
+        db.close()
 
 
 @router.post("/missions/start")
@@ -115,6 +139,18 @@ async def start_mission(request: StartMissionRequest):
     mission_id = str(uuid4())
     mission = {"mission_id": mission_id, "engine_id": request.engine_id, "profile_id": request.profile_id, "status": "running", "telemetry": []}
     _missions[mission_id] = mission
+    db = SessionLocal()
+    try:
+        engine = db.get(Engine, request.engine_id)
+        if engine is None:
+            db.add(Engine(id=request.engine_id, name=request.engine_id))
+        db.add(Mission(id=mission_id, engine_id=request.engine_id, profile_id=request.profile_id, status="in_progress"))
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Could not persist mission")
+    finally:
+        db.close()
     _state_for(request.engine_id)
     _tasks[mission_id] = asyncio.create_task(_mission_loop(mission_id, request.engine_id))
     return mission
@@ -129,11 +165,22 @@ async def stop_mission(request: StopMissionRequest):
     task = _tasks.pop(request.mission_id, None)
     if task:
         task.cancel()
+    db = SessionLocal()
+    try:
+        record = db.get(Mission, request.mission_id)
+        if record:
+            record.status = "completed"
+            record.end_time = datetime.now(timezone.utc).replace(tzinfo=None)
+            db.commit()
+    finally:
+        db.close()
     return mission
 
 
 @router.post("/faults/inject")
 async def inject_fault(request: FaultRequest):
+    if request.fault_type not in ALLOWED_FAULTS:
+        raise HTTPException(status_code=422, detail=f"Unsupported fault type: {request.fault_type}")
     state = _state_for(request.engine_id)
     state["active_fault"] = {"fault_type": request.fault_type, "severity": request.severity, "start_time": request.start_time}
     state["fault_probs"] = {request.fault_type: request.severity}

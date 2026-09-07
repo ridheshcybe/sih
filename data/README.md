@@ -5,8 +5,8 @@ This dataset contains synthetic telemetry generated to model aero-piston engine 
 ## Dataset summary
 - Number of missions: 12
 - Total rows: 21600
-- Healthy rows: 18005
-- Faulty rows: 3595
+- Healthy rows: 18165
+- Faulty rows: 3435
 - Train missions: 7
 - Validation missions: 2
 - Test missions: 3

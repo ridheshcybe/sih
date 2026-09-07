@@ -87,12 +87,8 @@ def ingest_telemetry_row(row_dict: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         logger.error("Telemetry ingest rejected: invalid timestamp %r", row_dict.get("timestamp"))
         return None
 
-    try:
-        engine_id = int(engine_id)
-        mission_id = int(mission_id)
-    except (TypeError, ValueError):
-        logger.error("Telemetry ingest rejected: engine_id and mission_id must be integers.")
-        return None
+    engine_id = str(engine_id)
+    mission_id = str(mission_id)
 
     db = SessionLocal()
     try:
