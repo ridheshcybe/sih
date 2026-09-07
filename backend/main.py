@@ -1,28 +1,64 @@
 import logging
-from fastapi import FastAPI
-from .api.routes import api_router
-# Initialize database connection here
+import time
+from contextlib import asynccontextmanager
 
-logging.basicConfig(level=logging.INFO)
-app = FastAPI(title="Digital Twin API", version="1.0")
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 
-# Include API routes
-app.include_router(api_router)
+from backend.api.routes_system import router as system_router
+from backend.api.routes_telemetry import router as telemetry_router
+from backend.api.routes_control import router as control_router
+from backend.config import APP_NAME, APP_VERSION, DEBUG, HOST, PORT
+from backend.db.database import create_all_tables
+from backend.websocket.server import router as websocket_router
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
+logger = logging.getLogger("backend.main")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    print("Backend starting")
+    logger.info("Loading backend configuration")
+    create_all_tables()
+    yield
+    print("Backend shutting down")
+
+
+app = FastAPI(title=APP_NAME, version=APP_VERSION, debug=DEBUG, lifespan=lifespan)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    start = time.perf_counter()
+    response = await call_next(request)
+    elapsed_ms = round((time.perf_counter() - start) * 1000, 2)
+    logger.info("%s %s -> %s in %.2f ms", request.method, request.url.path, response.status_code, elapsed_ms)
+    return response
+
 
 @app.get("/")
-def read_root():
+async def read_root():
     return {"status": "API Running", "service": "DigitalTwinBackend"}
 
-def run_migrations():
-    """Placeholder for database migration setup (e.g., using Alembic)."""
-    logging.info("Starting database migration process...")
-    # Logic to connect to SQLite/Postgres and run migrations
-    print("Migrations applied successfully.")
+
+app.include_router(system_router)
+app.include_router(telemetry_router)
+app.include_router(control_router)
+app.include_router(websocket_router)
+
 
 if __name__ == "__main__":
-    # 1. Run migrations first
-    run_migrations()
-    
-    # 2. Run the FastAPI application
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+
+    uvicorn.run("backend.main:app", host=HOST, port=PORT, reload=DEBUG)
