@@ -12,7 +12,6 @@ export default function FaultInjector({ engineId, notify }) {
     setBusy(true);
     const result = await injectFault(engineId, faultType, severity);
     setBusy(false);
-    notify(result ? "Fault injected successfully" : "Failed to inject fault", result ? "success" : "error");
     notify(result && !result.error ? "Fault injected successfully" : result?.error || "Failed to inject fault", result && !result.error ? "success" : "error");
   };
 
