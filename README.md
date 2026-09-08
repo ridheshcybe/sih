@@ -45,7 +45,8 @@ project-root/
   models/      Trained artifacts (anomaly, fault classifier, degradation, RUL)
   data/        Generated synthetic datasets (train/val/test CSV + DB)
   docs/        Architecture, API contract, task board, demo script, model card
-  scripts/     setup.sh, train_all.sh, start_demo.sh, ...
+  scripts/     cross-platform setup / training / inference / demo scripts
+               (bash + zsh: *.sh, PowerShell: *.ps1)
   tests/       pytest smoke tests (simulator + backend)
 ```
 
@@ -53,8 +54,15 @@ project-root/
 
 ### 1. Setup (once)
 
+Works in **bash / zsh / PowerShell** — pick your shell:
+
 ```bash
-bash scripts/setup.sh        # creates .venv, installs pip + npm deps
+bash scripts/setup.sh              # bash or zsh (macOS / Linux / Git Bash)
+```
+
+```powershell
+.\scripts\setup.ps1                # Windows PowerShell / pwsh
+.\scripts\setup.ps1 -WithGpu       # ...with CUDA PyTorch in one step
 ```
 
 ### 2. Train the ML models (on your GPU server farm)
@@ -73,6 +81,16 @@ bash scripts/train_gpu.sh --device auto          # trains all 4 models, ~25 epoc
 This trains with PyTorch (autoencoder for anomaly, MLP classifier, two MLP
 regressors) and prints test metrics. The synthetic dataset is generated
 automatically on first run (identical on every machine, fixed seed).
+
+Prefer a guided script (any platform)?
+
+```bash
+scripts/train_models.sh --gpu            # bash / zsh
+```
+
+```powershell
+.\scripts\train_models.ps1 -Gpu          # PowerShell
+```
 
 > **No models? No problem.** The backend runs fine **without** any trained
 > models — it falls back to rule-based residual monitoring (anomaly score,
@@ -118,6 +136,14 @@ cd frontend && npm run dev
 ## Manual commands
 
 ```bash
+# Inference CLI - run the trained (or fallback) ML stack outside the backend.
+# .\scripts\predict.ps1 on Windows; plain python also works:
+scripts/predict.sh --status                                        # what is loaded?
+scripts/predict.sh --csv data/test.csv --out data/predictions.csv  # score a CSV
+scripts/predict.sh --simulate --profile hot_weather \
+    --fault-type overheating --severity 0.7 --fault-start 60       # score a mission
+scripts/predict.sh --live --interval 1                             # watch mode
+
 # Regenerate the dataset (train/val/test split by mission, no leakage)
 .venv/bin/python -m simulator.generate_dataset --missions 40 --rows-per-mission 4000
 
