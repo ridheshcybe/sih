@@ -16,6 +16,9 @@ models/*.pkl
 frontend/node_modules/
 frontend/dist/
 
+# E2E test driver
+data/e2e/node_modules/
+
 # OS / editor
 .DS_Store
 Thumbs.db

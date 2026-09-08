@@ -10,7 +10,6 @@ fallback mode. ML training is deferred to the team's GPU server farm.
 |---|---|---|
 | Run `bash scripts/train_gpu.sh --device auto` on the GPU farm | ML | P0 |
 | Copy `models/*.pt` + `models/torch_*_meta.json` back to laptop, restart backend | ML | P0 |
-| Capture demo screenshots + polish slide deck | Demo | P1 |
 | UI polish pass (tooltips explaining each metric) | Frontend | P2 |
 | Docker-compose for one-command demo | Tech Lead | P2 |
 
@@ -37,13 +36,13 @@ fallback mode. ML training is deferred to the team's GPU server farm.
 | Mission controls + fault injection UI | Frontend | Dashboard page |
 | Docs: architecture, API, model card, demo script | Demo | `docs/` |
 | Smoke tests (simulator + backend) | Tech Lead | `tests/` |
+| Automated E2E browser demo + screenshots | Buffy (Codebuff) | `data/e2e/demo_flow.mjs`, `docs/screenshots/demo/` |
 
 ## To Do / Next 24 h ⏳
 
 | Task | Owner | Priority |
 |---|---|---|
 | Train models on a bigger dataset (e.g., 120 missions) for better metrics | ML | P1 |
-| Capture demo screenshots + polish slide deck | Demo | P1 |
 | UI polish pass (mobile layout, tooltips explaining each metric) | Frontend | P2 |
 | Docker-compose for one-command demo | Tech Lead | P2 |
 | Multi-engine support (schema already has engine_id) | Backend | P2 |

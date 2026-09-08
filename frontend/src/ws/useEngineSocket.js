@@ -54,12 +54,14 @@ export function useEngineSocket(engineId, onMessage) {
 }
 
 /** Accumulates points in a ref and flushes to React state on a fixed cadence
- *  so 10 Hz updates never cause render storms. */
+ *  so 10 Hz updates never cause render storms. The flush passes a *copy* —
+ *  React bails out on identical array references, which would freeze the
+ *  charts on their first (usually empty) snapshot. */
 export function useSeries(maxPoints = 500) {
   const ref = useRef([]);
   const [data, setData] = useState([]);
 
-  const flush = useCallback(() => setData(ref.current), []);
+  const flush = useCallback(() => setData([...ref.current]), []);
   useEffect(() => {
     const id = setInterval(flush, 500);
     return () => clearInterval(id);
