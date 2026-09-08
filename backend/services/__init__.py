@@ -1,0 +1,1 @@
+"""Backend service layer: ingest, digital twin, ML glue, WS, simulation."""

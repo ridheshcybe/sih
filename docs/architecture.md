@@ -1,67 +1,89 @@
-# Aero Piston Engine Digital Twin Architecture
+# Architecture — SIH26054 Digital Twin
 
-## Objective: Core State Representation Definition
+## Overview
 
-This document defines the core data structures (state vectors, sensor observations, and derived variables) necessary for the digital twin simulation and monitoring system (SIH26054).
+```
+┌──────────────────┐   REST + WS   ┌────────────────────────┐   ┌───────────────┐
+│ React Dashboard  │◄────────────►│  FastAPI Backend        │──►│   SQLite DB   │
+│ (localhost:3000) │  /api/v1 +    │  (localhost:8000)      │   │ data/sih26054 │
+└──────────────────┘  /ws/telemetry└───────────┬────────────┘   └───────────────┘
+                                               │
+                                     ┌─────────▼─────────┐
+                                     │  ML Inference     │◄── models/*.joblib
+                                     │  (scikit-learn)   │
+                                     └───────────────────┘
+                                               ▲
+                                     ┌─────────┴─────────┐
+                                     │  Simulator        │  (in-process runner OR
+                                     │  (engine model)   │   standalone --stream)
+                                     └───────────────────┘
+```
 
----
+## Components
 
-### PART A — Engine State Vector
+### 1. Simulator (`simulator/`)
+- `engine_model.py` — stateful, physics-inspired model: RPM/EGT/CHT/oil
+  pressure & temperature/fuel flow/vibration/battery/alternator/injection
+  timing from throttle, altitude, ambient temperature (first-order lags + noise).
+- `mission_profiles.py` — 4 profiles (standard ISR, high altitude, hot weather,
+  aggressive) as phase sequences (startup → takeoff → climb → cruise →
+  endurance → descent → landing → shutdown).
+- `fault_injection.py` — 7 fault types with sudden/gradual envelopes scaled by
+  severity; produces `fault_label`, `fault_severity`, `degradation_level`,
+  `rul_label`.
+- `simulate.py` / `generate_dataset.py` — mission simulation and train/val/test
+  dataset generation (split **by mission**, no leakage).
 
-The Engine State Vector ($\mathbf{S}_{eng}$) captures the physical and operational state of the engine at any given time.
+### 2. ML pipeline (`ml/`)
+- `feature_extractor.py` — fixed 78-dim vector per 3 s window: last value +
+  mean/std/min/max/slope per sensor, plus physics residuals (observed − expected).
+- Training: `train_anomaly.py` (Isolation Forest, healthy-only windows),
+  `train_fault_classifier.py` (Random Forest, 8 classes), `train_degradation_rul.py`
+  (two Random Forest regressors).
+- `inference.py` — `Predictor.predict_all()` with EMA smoothing and **safe
+  fallback defaults if any model file is missing**.
 
-| Field | Purpose |
-| :--- | :--- |
-| **Engine ID** | Unique identifier for the physical engine unit. |
-| **Mission ID** | Unique identifier for the overall flight mission. |
-| **Timestamp** | Time of measurement or calculation (epoch time). |
-| **Mission Phase** | Categorical phase of flight (startup, takeoff, climb, cruise, endurance, descent, landing). |
-| **Throttle Setting** | Normalized throttle input (0.0 to 1.0). |
-| **Engine Load** | Ratio of current power output to maximum rated power (0.0 to 1.0). |
-| **Altitude** | Vertical height above sea level (meters/feet). |
-| **Ambient Temperature** | Local atmospheric temperature ($\text{^\circ C}$ or $\text{^\circ F}$). |
-| **Ambient Pressure** | Local atmospheric pressure (kPa or $\text{inHg}$). |
-| **Airspeed** | Aircraft speed relative to the air (m/s or $\text{knots}$). |
-| **Control Inputs: Throttle Command** | Commanded normalized throttle value from the flight controller. |
-| **Control Inputs: Fuel Mixture** | Ratio of fuel to air supplied to the cylinders (e.g., 0.9 to 1.2). |
-| **Control Inputs: Propeller Pitch** | Current fixed or variable pitch of the propeller blades (degrees/radians). |
+### 3. Backend (`backend/`)
+- `main.py` — FastAPI app, CORS, lifespan (init DB, preload ML, default engine),
+  WebSocket endpoint `/ws/telemetry/{engine_id}`.
+- `services/digital_twin.py` — per row: expected values, residuals, feature
+  window → ML inference → Health Index/status → advisory; persists twin state,
+  fault predictions, advisories.
+- `services/simulation_runner.py` — in-process mission loop at 10 Hz
+  (ingest → twin → broadcast) + mission replay at 5x.
+- `services/ws_manager.py` — per-engine client registry, throttled broadcast
+  (max 5 msg/s/client, newest supersedes).
+- `services/reports.py` — mission diagnostic summary (health stats, fault
+  counts, advisories, final RUL).
 
----
+### 4. Frontend (`frontend/`)
+- Dashboard: Health gauge, RUL/anomaly/degradation strip, 4 live charts
+  (Health/Anomaly, EGT/CHT, RPM/OilP, Vibration), alerts panel, telemetry
+  table, mission controls, fault injector, replay controls.
+- Missions / Reports pages. WebSocket auto-reconnect with exponential backoff;
+  5 s REST polling as a fallback. Vite proxies `/api` and `/ws` to the backend.
 
-### PART B — Sensor Observation Vector
+## Data flow (one telemetry row @ 10 Hz)
 
-The Sensor Observation Vector ($\mathbf{O}_{sens}$) aggregates all measured physical parameters.
+```
+simulator step ─► ingest (validate + store) ─► digital twin
+   (expected sensors, residuals, feature window)
+      ─► ML predict_all (anomaly, fault probs, degradation, RUL)
+      ─► Health Index + status + advisory
+      ─► persist (twin_states, fault_predictions, maintenance_advisories)
+      ─► broadcast (telemetry_update, twin_state_update, fault_prediction)
+```
 
-| Sensor | Unit | Typical Healthy Range | Failure Mode Examples |
-| :--- | :--- | :--- | :--- |
-| **RPM** | $\text{rpm}$ | $0 - 30000$ (Operational range) | Dropout (zero reading), Stuck Value (constant value), Noise (high frequency jitter). |
-| **CHT** | $\text{^\circ C}$ | $450 - 650$ | Drift (slow change over time), Stuck Value (due to sensor failure). |
-| **EGT** | $\text{^\circ C}$ | $600 - 900$ | Dropout, Noise, Illegal Value (outside physical bounds). |
-| **Oil Pressure** | $\text{kPa}$ | $300 - 600$ | Stuck Value, Drift (slow loss of pressure). |
-| **Oil Temperature** | $\text{^\circ C}$ | $50 - 120$ | Dropout, Stuck Value (frozen reading). |
-| **Fuel Flow** | $\text{kg/hr}$ | $0 - 500$ (Depends on engine size) | Dropout, Stuck Value (if valve is fully open/closed). |
-| **Vibration** | $\text{mm/s}$ (RMS) | $0 - 5$ | Noise, Drift, Stuck Value (due to sensor disconnection). |
-| **Battery Voltage** | $\text{V}$ | $24 - 28$ | Dropout, Drift (slow decline due to battery degradation). |
-| **Alternator Current** | $\text{A}$ | $50 - 150$ | Dropout, Stuck Value (zero current when running). |
-| **Injection Timing** | $\text{degrees BTDC}$ | $5 - 20$ (Engine specific) | Dropout, Stuck Value (e.g., locked to a default value). |
-| **Manifold Pressure** | $\text{kPa}$ | $100 - 500$ | Dropout, Stuck Value. |
-| **Fuel Remaining** | $\text{liters}$ | $0 - 50$ | Dropout (transient sensor failure). |
+## Non-functional notes
 
----
+- End-to-end latency ≪ 200 ms budget (models are tree-based, inference < 5 ms).
+- WS throttling protects the browser from 10 Hz rendering storms; the UI
+  re-renders chart series at 500 ms cadence.
+- ML failure is non-fatal: missing/corrupt model ⇒ default predictions + warning log.
+- SQLite is per-process; restart recreates schema, data persists in `data/`.
 
-### PART C — Derived and Latent Variables
+## Known limits
 
-These variables are not directly measured but are calculated using physics models and machine learning estimates, providing insight into the engine's health and performance.
-
-| Variable | Description | Use in Physics Layer | Use in ML Layer |
-| :--- | :--- | :--- | :--- |
-| **Expected CHT** | CHT predicted based on $\mathbf{S}_{eng}$ and mission phase. | Used for real-time constraint checking and identifying immediate overheating risk. | Input feature for predicting Remaining Useful Life (RUL) and correlating with degradation models. |
-| **Expected EGT** | EGT predicted based on throttle, fuel, and airspeed. | Used to model thermodynamic efficiency and predict component wear rates. | Used to train models on healthy operating envelope boundaries and detect deviations from optimal performance. |
-| **Expected Oil Pressure** | Oil pressure modeled based on RPM and oil temperature. | Used for calculating lubrication efficiency and diagnosing pump/bearing wear. | Acts as a primary feature for fault classification (e.g., pump failure, internal leak). |
-| **Expected Fuel Flow** | Fuel flow predicted based on required power and air density. | Used for fuel efficiency monitoring and validating fuel system performance. | Used to detect leaks or inefficiencies (e.g., incorrect mixing ratio). |
-| **Expected Vibration Baseline** | Baseline vibration signature (RMS/FFT) expected for current operating conditions. | Used as a dynamic reference point for structural integrity monitoring. | Input feature for condition-based monitoring and identifying changes in component balance/health. |
-| **Sensor Residuals** | $(\mathbf{O}_{sens} - \text{Expected Value})$. Measures the deviation of measured data from the physical model's prediction. | Key diagnostic tool. Large residuals pinpoint where the physical model fails (e.g., non-linear component failure). | Input for outlier detection and anomaly scoring. Residual patterns can map directly to fault types. |
-| **Health State** | Categorical assessment (Healthy, Degraded, Faulty). | Triggers operational alerts and shifts the control logic to protective modes. | The primary output variable for supervised fault classification models. |
-| **Degradation Level** | Quantitative measure (0-100%) of overall engine performance loss relative to factory new. | Used to adjust control gain and limit maximum allowable operating points. | The target variable for Regression models (predicting time-to-failure). |
-| **Fault State** | Specific fault classification (none, misfire, injector, lubrication, overheating, sensor fault, etc.). | Determines the severity and recommended mitigation action (e.g., reduce power, shut down). | The primary output for the fault detection module, classifying the source of the deviation. |
-| **Sensor Confidence** | Confidence score (0-1) in the raw measurement data, calculated from internal checks. | Used to weight sensor inputs. Low confidence suggests relying more on the physics model. | Used to weight feature vectors in the ML layer, effectively masking unreliable data points. |
+- Single engine (ENG-001) focus; multi-engine is a schema/UI extension.
+- Replay recomputes twin state from stored telemetry (does not duplicate rows).
+- No auth, no TLS — local demo only.

@@ -1,166 +1,162 @@
+"""Fault injection for the SIH26054 simulator.
+
+Each fault type modifies specific sensor channels with a time pattern
+('gradual' ramp or 'sudden' step) scaled by a severity 0..1, over an active
+window [start_s, start_s + duration_s]. It also produces label columns:
+fault_label, fault_severity, degradation_level, rul_label.
+"""
+
 from __future__ import annotations
 
 import math
-import random
-from typing import Any, Dict, Iterable, List
+from typing import Dict, Optional
+
+import numpy as np
+
+FAULT_TYPES = [
+    "misfire",
+    "injector_degradation",
+    "lubrication_issue",
+    "overheating",
+    "sensor_drift",
+    "abnormal_vibration",
+    "battery_alternator_degradation",
+]
+
+RUL_MAX_HOURS = 500.0  # nominal remaining useful life of a healthy engine
+
+SENSOR_RANGES: Dict[str, tuple] = {
+    "rpm": (0.0, 5800.0),
+    "cht": (20.0, 300.0),
+    "egt": (100.0, 900.0),
+    "oil_pressure": (0.2, 5.5),
+    "oil_temperature": (10.0, 150.0),
+    "fuel_flow": (0.5, 26.0),
+    "vibration_rms": (0.05, 6.0),
+    "battery_voltage": (18.0, 28.5),
+    "alternator_current": (0.0, 60.0),
+    "injection_timing": (5.0, 40.0),
+}
 
 
-FAULT_LIBRARY: Dict[str, Dict[str, Any]] = {
+class InjectedFault:
+    """One active fault: which sensors it touches and how."""
+
+    def __init__(self, fault_type: str, severity: float, start_s: float, duration_s: float,
+                 pattern: str = "gradual", ramp_s: float = 60.0):
+        self.fault_type = fault_type
+        self.severity = float(np.clip(severity, 0.05, 1.0))
+        self.start_s = float(start_s)
+        self.duration_s = float(duration_s)
+        self.pattern = pattern  # 'gradual' or 'sudden'
+        self.ramp_s = float(ramp_s)
+
+    def is_active(self, t: float) -> bool:
+        return self.start_s <= t <= self.start_s + self.duration_s
+
+    def envelope(self, t: float) -> float:
+        """0..1 multiplier describing how fully the fault has manifested."""
+        if not self.is_active(t):
+            return 0.0
+        local = t - self.start_s
+        if self.pattern == "sudden":
+            return self.severity
+        ramp = min(local / max(self.ramp_s, 1.0), 1.0)
+        tail = min((self.start_s + self.duration_s - t) / max(self.ramp_s, 1.0), 1.0)
+        return self.severity * min(ramp, tail)
+
+
+FAULT_EFFECTS: Dict[str, Dict[str, str]] = {
     "misfire": {
-        "effects": {"rpm": -0.12, "egt": 0.18, "vibration_rms": 0.40},
-        "pattern": "sudden",
-        "sensors": ["rpm", "egt", "vibration_rms"],
+        "vibration_rms": "add 1.6",
+        "egt": "add 45",
+        "rpm": "jitter 1.6",
     },
     "injector_degradation": {
-        "effects": {"egt": 0.12, "cht": 0.10, "fuel_flow": 0.15},
-        "pattern": "gradual",
-        "sensors": ["egt", "cht", "fuel_flow"],
+        "fuel_flow": "scale 0.65",
+        "egt": "add 65",
+        "cht": "add 28",
     },
     "lubrication_issue": {
-        "effects": {"oil_pressure": -0.25, "oil_temperature": 0.16, "vibration_rms": 0.30},
-        "pattern": "gradual",
-        "sensors": ["oil_pressure", "oil_temperature", "vibration_rms"],
+        "oil_pressure": "sub 1.9",
+        "oil_temperature": "add 28",
     },
     "overheating": {
-        "effects": {"cht": 0.18, "egt": 0.22, "fuel_flow": 0.12},
-        "pattern": "gradual",
-        "sensors": ["cht", "egt", "fuel_flow"],
+        "cht": "add 75",
+        "egt": "add 55",
+        "oil_temperature": "add 22",
     },
     "sensor_drift": {
-        "effects": {"cht": 0.30},
-        "pattern": "gradual",
-        "sensors": ["cht"],
-    },
-    "sensor_dropout": {
-        "effects": {"cht": "nan"},
-        "pattern": "sudden",
-        "sensors": ["cht"],
+        "cht": "drift 55",
+        "egt": "drift 40",
     },
     "abnormal_vibration": {
-        "effects": {"vibration_rms": 0.55},
-        "pattern": "gradual",
-        "sensors": ["vibration_rms"],
+        "vibration_rms": "add 2.2",
+        "egt": "add 18",
     },
     "battery_alternator_degradation": {
-        "effects": {"battery_voltage": -0.18, "alternator_current": 0.25},
-        "pattern": "gradual",
-        "sensors": ["battery_voltage", "alternator_current"],
+        "battery_voltage": "sub 2.8",
+        "alternator_current": "sub 18",
     },
 }
 
 
-def _clamp(value: float, lower: float, upper: float) -> float:
-    return max(lower, min(upper, value))
+def apply_faults(sensors: Dict[str, float], faults: list, t: float,
+                 rng: np.random.Generator) -> Dict[str, float]:
+    """Modify a healthy sensor dict in place according to active faults."""
+    out = dict(sensors)
+    for f in faults:
+        env = f.envelope(t)
+        if env <= 0.0:
+            continue
+        for sensor, spec in FAULT_EFFECTS.get(f.fault_type, {}).items():
+            op, _, val = spec.partition(" ")
+            val = float(val)
+            if op == "add":
+                out[sensor] = out.get(sensor, 0.0) + val * env
+            elif op == "sub":
+                out[sensor] = out.get(sensor, 0.0) - val * env
+            elif op == "scale":
+                out[sensor] = out.get(sensor, 0.0) * (1.0 - (1.0 - val) * env)
+            elif op == "jitter":
+                out[sensor] = out.get(sensor, 0.0) + rng.normal(0.0, 1.0) * val * env
+            elif op == "drift":
+                # Drift grows linearly over the fault lifetime.
+                local = max(0.0, min((t - f.start_s) / max(f.duration_s, 1.0), 1.0))
+                out[sensor] = out.get(sensor, 0.0) + val * env * local
+    # Clamp everything to plausible ranges so combined faults stay physical.
+    for sensor, (lo, hi) in SENSOR_RANGES.items():
+        if sensor in out:
+            out[sensor] = float(np.clip(out[sensor], lo, hi))
+    return out
 
 
-def apply_fault(telemetry_row: Dict[str, Any], fault_type: str, severity: float, time_since_fault_start: float) -> Dict[str, Any]:
-    row = dict(telemetry_row)
-    severity = max(0.0, min(1.0, float(severity)))
-    fault_type = fault_type.lower()
-    if fault_type not in FAULT_LIBRARY:
-        return row
-
-    if fault_type == "misfire":
-        row["rpm"] = row.get("rpm", 0.0) * (1.0 - severity * 0.16) - 80.0 * severity
-        row["egt"] = row.get("egt", 0.0) * (1.0 + severity * 0.22) + 35.0 * severity
-        row["vibration_rms"] = row.get("vibration_rms", 0.0) * (1.0 + severity * 0.56)
-
-    elif fault_type == "injector_degradation":
-        row["egt"] = row.get("egt", 0.0) * (1.0 + severity * 0.14) + 18.0 * severity
-        row["cht"] = row.get("cht", 0.0) * (1.0 + severity * 0.12) + 12.0 * severity
-        row["fuel_flow"] = row.get("fuel_flow", 0.0) * (1.0 + severity * 0.20)
-
-    elif fault_type == "lubrication_issue":
-        row["oil_pressure"] = row.get("oil_pressure", 0.0) * (1.0 - severity * 0.30) - 5.0 * severity
-        row["oil_temperature"] = row.get("oil_temperature", 0.0) * (1.0 + severity * 0.18) + 8.0 * severity
-        row["vibration_rms"] = row.get("vibration_rms", 0.0) * (1.0 + severity * 0.45)
-
-    elif fault_type == "overheating":
-        row["cht"] = row.get("cht", 0.0) * (1.0 + severity * 0.20) + 20.0 * severity
-        row["egt"] = row.get("egt", 0.0) * (1.0 + severity * 0.25) + 28.0 * severity
-        row["fuel_flow"] = row.get("fuel_flow", 0.0) * (1.0 + severity * 0.10)
-
-    elif fault_type == "sensor_drift":
-        drift = 5.0 * severity * max(0.0, time_since_fault_start / 60.0)
-        row["cht"] = row.get("cht", 0.0) + drift
-
-    elif fault_type == "sensor_dropout":
-        row["cht"] = float("nan")
-
-    elif fault_type == "abnormal_vibration":
-        row["vibration_rms"] = row.get("vibration_rms", 0.0) * (1.0 + severity * 0.90) + 2.0 * severity
-
-    elif fault_type == "battery_alternator_degradation":
-        row["battery_voltage"] = row.get("battery_voltage", 0.0) * (1.0 - severity * 0.22) - 1.5 * severity
-        row["alternator_current"] = row.get("alternator_current", 0.0) * (1.0 + severity * 0.32) + 8.0 * severity
-
-    # Clamp impossible values after faults.
-    row["rpm"] = max(400.0, float(row.get("rpm", 400.0)))
-    row["oil_pressure"] = max(0.0, float(row.get("oil_pressure", 0.0)))
-    row["battery_voltage"] = max(8.0, float(row.get("battery_voltage", 8.0)))
-    row["alternator_current"] = max(0.0, float(row.get("alternator_current", 0.0)))
-    row["vibration_rms"] = max(0.0, float(row.get("vibration_rms", 0.0)))
-    row["cht"] = float(row.get("cht", 0.0))
-    row["egt"] = float(row.get("egt", 0.0))
-    row["fuel_flow"] = max(0.0, float(row.get("fuel_flow", 0.0)))
-    row["oil_temperature"] = max(0.0, float(row.get("oil_temperature", 0.0)))
-    return row
+def degradation_level(faults: list, t: float) -> float:
+    """0..1: how degraded the engine is at time t (max over active faults)."""
+    level = 0.0
+    for f in faults:
+        env = f.envelope(t)
+        if env > level:
+            level = env
+    return round(float(level), 4)
 
 
-def generate_faulty_mission(profile_id: str, fault_list: Iterable[Dict[str, Any]], duration_seconds: int = 1800):
-    from simulator.mission_profiles import generate_mission_profile
-
-    mission = generate_mission_profile(profile_id, duration_seconds)
-    rows = []
-
-    for sample in mission["timeline"]:
-        row = {
-            "timestamp": sample["timestamp"],
-            "mission_id": 0,
-            "profile_id": profile_id,
-            "phase": sample["phase"],
-            "throttle": sample["throttle"],
-            "rpm": sample["rpm"],
-            "altitude": sample["altitude"],
-            "ambient_temperature": sample["ambient_temperature"],
-            "cht": 170.0 + (sample["rpm"] / 25.0) + sample["ambient_temperature"] * 0.6,
-            "egt": 480.0 + (sample["rpm"] / 20.0) + sample["ambient_temperature"] * 0.9,
-            "oil_pressure": 46.0 - (sample["altitude"] / 250.0),
-            "oil_temperature": 88.0 + (sample["ambient_temperature"] * 0.7),
-            "fuel_flow": 15.0 + (sample["throttle"] / 10.0),
-            "vibration_rms": 1.2 + (sample["rpm"] / 3000.0),
-            "battery_voltage": 28.5,
-            "alternator_current": 16.0,
-            "injection_timing": 18.0,
-            "fault_type": "healthy",
-            "fault_severity": 0.0,
-            "degradation_level": 0.0,
-            "rul_label": "healthy",
-        }
-
-        active_faults = []
-        for fault in fault_list:
-            start_t = float(fault.get("start_time", 0.0))
-            end_t = float(fault.get("end_time", duration_seconds))
-            if start_t <= sample["timestamp"] <= end_t:
-                active_faults.append(fault)
-
-        if active_faults:
-            for fault in active_faults:
-                row = apply_fault(
-                    row,
-                    fault.get("fault_type", "injector_degradation"),
-                    float(fault.get("severity", 0.5)),
-                    sample["timestamp"] - float(fault.get("start_time", sample["timestamp"])),
-                )
-                row["fault_type"] = fault.get("fault_type", "injector_degradation")
-                row["fault_severity"] = float(fault.get("severity", 0.5))
-                row["degradation_level"] = round(min(1.0, 0.25 + float(fault.get("severity", 0.5)) * 0.75), 4)
-                row["rul_label"] = "degraded"
-
-        rows.append(row)
-
-    return rows
+def rul_label(degradation: float, rng: np.random.Generator) -> float:
+    """Remaining useful life label (hours) consistent with degradation."""
+    return round(max(0.0, RUL_MAX_HOURS * (1.0 - degradation) + rng.normal(0.0, 5.0)), 1)
 
 
-__all__ = ["FAULT_LIBRARY", "apply_fault", "generate_faulty_mission"]
+def dominant_fault(faults: list, t: float) -> Optional[str]:
+    active = [f.fault_type for f in faults if f.envelope(t) > 0.05]
+    return active[0] if active else "none"
+
+
+def parse_fault_config(fault_type: Optional[str], severity: float, start_s: float,
+                       duration_s: float, pattern: str = "gradual",
+                       ramp_s: float = 60.0) -> Optional[InjectedFault]:
+    """Build an InjectedFault from config values, or None for a healthy mission."""
+    if not fault_type or fault_type == "none":
+        return None
+    if fault_type not in FAULT_TYPES:
+        raise ValueError(f"Unknown fault type '{fault_type}'. Available: {FAULT_TYPES}")
+    return InjectedFault(fault_type, severity, start_s, duration_s, pattern, ramp_s)

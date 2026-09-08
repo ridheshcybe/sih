@@ -1,0 +1,8 @@
+# GPU training dependencies. Install the CUDA build of torch first (match your
+# driver), e.g.:
+#   pip install torch --index-url https://download.pytorch.org/whl/cu124
+#   # or cu121 / cu126 / cu128 depending on your CUDA driver
+# then install the rest:
+#   pip install -r requirements-gpu.txt
+-r requirements.txt
+torch>=2.2

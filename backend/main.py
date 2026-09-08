@@ -1,64 +1,94 @@
+"""SIH26054 FastAPI backend entrypoint.
+
+Run from the project root:
+    uvicorn backend.main:app --reload --port 8000
+"""
+
+from __future__ import annotations
+
 import logging
-import time
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.api.routes_system import router as system_router
-from backend.api.routes_telemetry import router as telemetry_router
-from backend.api.routes_control import router as control_router
-from backend.config import ALLOWED_ORIGINS, APP_NAME, APP_VERSION, DEBUG, HOST, PORT
-from backend.db.database import create_all_tables
-from backend.websocket.server import router as websocket_router
+from backend.config import APP_NAME, APP_VERSION, DEFAULT_ENGINE_ID, DEFAULT_ENGINE_NAME
+from backend.database import SessionLocal, init_db
+from backend.models import Engine
+from backend.routers import engines, faults, missions, replay, reports, simulation, system, telemetry
+from backend.services.ml_inference import get_ml_predictor
+from backend.services.simulation_runner import runner
+from backend.services.ws_manager import manager
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-)
-logger = logging.getLogger("backend.main")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+logger = logging.getLogger("sih26054")
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
-    print("Backend starting")
-    logger.info("Loading backend configuration")
-    create_all_tables()
+async def lifespan(_: FastAPI):
+    print("Backend starting ...")
+    init_db()
+    _ensure_default_engine()
+    get_ml_predictor()  # preload ML models (fallbacks if missing)
+    print("Backend ready. ML models:", get_ml_predictor().status)
     yield
-    print("Backend shutting down")
+    print("Backend shutting down ...")
+    for engine_id in list(runner.running_engines()):
+        await runner.stop_mission(engine_id)
+    await runner.stop_replay()
 
 
-app = FastAPI(title=APP_NAME, version=APP_VERSION, debug=DEBUG, lifespan=lifespan)
+def _ensure_default_engine() -> None:
+    db = SessionLocal()
+    try:
+        if db.get(Engine, DEFAULT_ENGINE_ID) is None:
+            db.add(Engine(id=DEFAULT_ENGINE_ID, name=DEFAULT_ENGINE_NAME, status="OPERATIONAL"))
+            db.commit()
+            logger.info("Created default engine %s", DEFAULT_ENGINE_ID)
+    finally:
+        db.close()
+
+
+app = FastAPI(title=APP_NAME, version=APP_VERSION, lifespan=lifespan)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
-    allow_credentials=False,
+    allow_origins=["*"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+app.include_router(system.router)
+app.include_router(missions.router)
+app.include_router(engines.router)
+app.include_router(simulation.router)
+app.include_router(faults.router)
+app.include_router(replay.router)
+app.include_router(reports.router)
+app.include_router(telemetry.router)
 
-@app.middleware("http")
-async def log_requests(request: Request, call_next):
-    start = time.perf_counter()
-    response = await call_next(request)
-    elapsed_ms = round((time.perf_counter() - start) * 1000, 2)
-    logger.info("%s %s -> %s in %.2f ms", request.method, request.url.path, response.status_code, elapsed_ms)
-    return response
+
+@app.websocket("/ws/telemetry/{engine_id}")
+async def ws_telemetry(websocket: WebSocket, engine_id: str) -> None:
+    await manager.connect(engine_id, websocket)
+    try:
+        while True:
+            # Block until the client sends something or disconnects; inbound
+            # client messages are informational only.
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        await manager.disconnect(engine_id, websocket)
+    except Exception:  # noqa: BLE001
+        await manager.disconnect(engine_id, websocket)
 
 
 @app.get("/")
-async def read_root():
-    return {"status": "API Running", "service": "DigitalTwinBackend"}
-
-
-app.include_router(system_router)
-app.include_router(telemetry_router)
-app.include_router(control_router)
-app.include_router(websocket_router)
-
-
-if __name__ == "__main__":
-    import uvicorn
-
-    uvicorn.run("backend.main:app", host=HOST, port=PORT, reload=DEBUG)
+def root() -> dict:
+    return {
+        "app": APP_NAME,
+        "version": APP_VERSION,
+        "docs": "/docs",
+        "health": "/api/system/health",
+        "ws": f"/ws/telemetry/{DEFAULT_ENGINE_ID}",
+    }

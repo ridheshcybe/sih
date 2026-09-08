@@ -1,43 +1,32 @@
-"""Application configuration for the digital twin backend."""
+"""Backend configuration.
+
+Everything has laptop-friendly defaults and can be overridden with
+environment variables (e.g. SIH_DATABASE_URL, SIH_MODEL_PATH).
+"""
+
+from __future__ import annotations
 
 import os
 from pathlib import Path
-from types import SimpleNamespace
 
-ROOT = Path(__file__).resolve().parent.parent
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DATA_DIR = PROJECT_ROOT / "data"
+MODELS_DIR = PROJECT_ROOT / "models"
 
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
-def _as_bool(value: str, default: str = "false") -> bool:
-    return str(value or default).strip().lower() in {"1", "true", "yes", "on"}
+DATABASE_URL = os.environ.get("SIH_DATABASE_URL", f"sqlite:///{DATA_DIR / 'sih26054.db'}")
+MODEL_PATH = os.environ.get("SIH_MODEL_PATH", str(MODELS_DIR))
 
+# Simulation step (seconds) and default engine identity.
+SIM_DT = float(os.environ.get("SIH_SIM_DT", "0.1"))
+DEFAULT_ENGINE_ID = os.environ.get("SIH_ENGINE_ID", "ENG-001")
+DEFAULT_ENGINE_NAME = "Aero Piston Engine Prototype"
+DEFAULT_PROFILE_ID = "standard_isr"
 
-APP_NAME = "Digital Twin API"
-APP_VERSION = "1.0.0"
-DEBUG = _as_bool(os.getenv("TWIN_DEBUG", "false"))
-HOST = os.getenv("TWIN_HOST", "127.0.0.1")
-PORT = int(os.getenv("TWIN_PORT", "8000"))
+# WebSocket throttling: max messages per second per client connection.
+WS_MAX_MSGS_PER_SEC = 5
 
-DATABASE_URL = os.getenv(
-    "TWIN_DATABASE_URL",
-    f"sqlite:///{ROOT / 'backend' / 'digital_twin.db'}",
-)
-MODEL_PATH = os.getenv("TWIN_MODEL_PATH", str(ROOT / "models"))
-TELEMETRY_BATCH_LIMIT = int(os.getenv("TWIN_BATCH_LIMIT", "500"))
-WS_MAX_MSG_PER_SEC = float(os.getenv("TWIN_WS_RATE", "5"))
-WS_QUEUE_MODE = os.getenv("TWIN_WS_QUEUE_MODE", "drop_oldest")
-
-settings = SimpleNamespace(
-    APP_NAME=APP_NAME,
-    APP_VERSION=APP_VERSION,
-    DEBUG=DEBUG,
-    HOST=HOST,
-    PORT=PORT,
-    DATABASE_URL=DATABASE_URL,
-    MODEL_PATH=MODEL_PATH,
-    TELEMETRY_BATCH_LIMIT=TELEMETRY_BATCH_LIMIT,
-    WS_MAX_MSG_PER_SEC=WS_MAX_MSG_PER_SEC,
-    WS_QUEUE_MODE=WS_QUEUE_MODE,
-)
-
-ALLOWED_ORIGINS = [origin.strip() for origin in os.getenv("TWIN_ALLOWED_ORIGINS", "http://localhost:3000").split(",") if origin.strip()]
-
+APP_NAME = "SIH26054 Digital Twin"
+APP_VERSION = "0.1.0"

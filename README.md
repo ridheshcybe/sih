@@ -1,87 +1,151 @@
-# SIH26054: AI-Enabled Digital Twin for Aero Piston Engines
+# SIH26054 — AI-Enabled Digital Twin for Aero Piston Engines (MALE UAV)
 
-An AI-powered real-time digital twin system for monitoring, predicting faults, and enhancing mission reliability of Aero Piston Engines used in MALE UAVs.
+An AI-powered real-time digital twin system for **health monitoring, fault prediction,
+and mission-reliability enhancement** of aero piston engines used in MALE UAVs
+(DRDO / iDEX problem statement SIH26054).
 
-## 🚀 Problem Statement
+> **Disclaimer:** This is a hackathon software demonstrator. It runs on **realistic
+> synthetic telemetry** and makes **no claim of flight certification or real-engine
+> validation**.
 
-Maintaining optimal operational status of aero engines in MALE UAVs is critical for mission success. Failures or degradation can severely compromise flight safety and mission completion. We provide a comprehensive digital twin solution to monitor engine health in real-time, predict potential faults, and enhance overall mission reliability using AI.
+## What it does
 
-## 🛠 Tech Stack
+- Simulates a piston engine through realistic mission profiles (ISR, high-altitude,
+  hot-weather, aggressive) at 10 Hz.
+- Injects 7 fault types (misfire, injector degradation, lubrication issue,
+  overheating, sensor drift, abnormal vibration, battery/alternator degradation).
+- Computes a **digital twin state** per telemetry row: physics-based expected
+  values, residuals, Health Index (0–100), anomaly score, degradation level,
+  Remaining Useful Life (RUL) and maintenance advisories.
+- Streams everything to a React dashboard over WebSockets.
+- Records missions and generates post-mission diagnostic reports; supports
+  mission replay.
 
-- __Backend:__ FastAPI (Python)
-- __Frontend:__ React (JavaScript)
-- __Database:__ SQLite (Local persistence, for simplicity)
-- __ML/AI:__ Scikit-learn, TensorFlow/PyTorch (Python)
-- __Simulator:__ Python/NumPy (Simulates engine telemetry)
-- __Communication:__ WebSockets (Real-time data streaming)
+## Tech stack
 
-## ⚙️ System Architecture (Conceptual)
+| Layer | Tech |
+|---|---|
+| Backend | FastAPI + Uvicorn, SQLAlchemy, SQLite |
+| Real-time | WebSockets (throttled to 5 msg/s/client) |
+| ML | **PyTorch (GPU-trained, CPU inference)**; optional scikit-learn baselines |
+| Simulator | Python + NumPy + Pandas |
+| Frontend | React 18 + Vite + Recharts |
+| Tests | pytest |
 
-The system operates as a closed loop: The __Simulator__ generates realistic telemetry (including fault injection). The __Backend__ receives this data via WebSockets, processes it using the __ML Models__ (Anomaly Detection, RUL), and stores the processed state/Health Index in the __SQLite__ database. The __Frontend__ consumes the real-time state and historical data to display the Digital Twin Dashboard.
+## Repository structure
 
-## 💡 Getting Started
-
-### 1. Prerequisites
-
-Ensure you have Python (3.8+) and Node.js/npm installed.
-
-```bash
-pip install -r backend/requirements.txt
-npm install # in backend-app/
+```
+project-root/
+  backend/     FastAPI app: routers, services (ingest, digital twin, ML glue,
+               WebSocket manager, simulation runner), SQLAlchemy models
+  frontend/    React dashboard (Vite): live charts, twin state, mission controls
+  ml/          Feature extractor, training scripts, inference service
+  simulator/   Physics-inspired engine model, mission profiles, fault injection,
+               dataset generation
+  models/      Trained artifacts (anomaly, fault classifier, degradation, RUL)
+  data/        Generated synthetic datasets (train/val/test CSV + DB)
+  docs/        Architecture, API contract, task board, demo script, model card
+  scripts/     setup.sh, train_all.sh, start_demo.sh, ...
+  tests/       pytest smoke tests (simulator + backend)
 ```
 
-### 2. Running Components
+## Quickstart (laptop-friendly)
 
-__🌐 Start Backend API (Python/FastAPI)__ The backend manages data ingestion, ML calls, and WebSocket connections.
-
-```bash
-uvicorn backend.main:app --reload --port 8000
-# (Logs show API listening on http://localhost:8000)
-```
-
-__🖥️ Start Frontend Dashboard (React)__ The frontend consumes the real-time data stream from the backend.
+### 1. Setup (once)
 
 ```bash
-cd backend-app
-npm run dev
-# (Dashboard should open in your browser, e.g., http://localhost:3000)
+bash scripts/setup.sh        # creates .venv, installs pip + npm deps
 ```
 
-__🛰️ Run Simulator (Python)__ The simulator generates synthetic telemetry and pushes it to the backend WebSocket endpoint.
+### 2. Train the ML models (on your GPU server farm)
+
+Training is designed for a CUDA machine — see `docs/gpu_training.md` for the
+full guide. Short version:
 
 ```bash
-python -m simulator.run_simulation
-# Generates synthetic mission datasets. The dashboard demo loop is started from the UI.
+# on the GPU server
+pip install torch --index-url https://download.pytorch.org/whl/cu124   # match your driver
+pip install -r requirements-gpu.txt
+bash scripts/train_gpu.sh --device auto          # trains all 4 models, ~25 epochs
+# copy models/*.pt + models/torch_*_meta.json back to the laptop models/
 ```
 
-__🔬 ML Training (For Retraining/Testing)__ Run this command to train or validate the core ML models (e.g., Anomaly Detection or RUL).
+This trains with PyTorch (autoencoder for anomaly, MLP classifier, two MLP
+regressors) and prints test metrics. The synthetic dataset is generated
+automatically on first run (identical on every machine, fixed seed).
+
+> **No models? No problem.** The backend runs fine **without** any trained
+> models — it falls back to rule-based residual monitoring (anomaly score,
+> Health Index drop, advisories all still work) and logs warnings. Train when
+> you're ready; just restart the backend to pick up the new artifacts.
+
+Optional CPU baselines (`bash scripts/train_all.sh`, scikit-learn) still exist
+under `ml/train_*.py` if you want quick laptop checks — inference prefers the
+PyTorch models when both are present.
+
+### 3. Run the demo
 
 ```bash
-python ml/train_all_models.py
+bash scripts/start_demo.sh
 ```
 
-### 3. Data Generation & Synthetic Simulation
+- Dashboard → http://localhost:3000
+- API docs → http://localhost:8000/docs
 
-Synthetic data is generated and managed within the `simulator/` and `data/` folders.
+Or run components manually in three terminals:
 
-- __Simulation:__ Use `python simulator/run_simulation.py`. This simulates the entire operational cycle, including fault injection based on predefined mission profiles.
-- __Data Preparation:__ For initial model testing, raw data and pre-processed feature sets are located in the `data/` directory.
+```bash
+# Terminal 1 - backend
+.venv/bin/python -m uvicorn backend.main:app --reload --port 8000   # or .venv/Scripts/python.exe on Windows
 
-### 4. Running a Full Demo Cycle
+# Terminal 2 - frontend
+cd frontend && npm run dev
 
-To run a complete, end-to-end demonstration:
+# Terminal 3 - standalone simulator (optional; the backend can run its own)
+.venv/bin/python -m simulator.run_simulation --profile standard_isr --duration 300 \
+    --fault-type injector_degradation --severity 0.6 --fault-start 60 --stream
+```
 
-1. __Start Backend:__ Open Terminal 1 and run `uvicorn backend.main:app --reload --port 8000`.
-2. __Start Frontend:__ Open Terminal 2 and run `cd backend-app && npm run dev`.
-3. __Start Mission:__ Open `http://localhost:3000` and click `Start Mission`.
-4. __Observe:__ The dashboard updates with synthetic telemetry, Health Index, fault effects, and WebSocket status.
+### 4. Demo in the browser
 
-## 📚 Resources & Contracts
+1. On the Dashboard, pick a profile (e.g. `standard_isr`) and click **Start Mission**.
+2. Watch Health Index, RPM/EGT/CHT charts and the telemetry table stream live.
+3. Pick a fault (e.g. `injector_degradation`), set severity, click **Inject Fault**.
+4. Watch anomaly score rise, Health Index fall, RUL count down and an advisory appear.
+5. Click **Stop Mission**, then **Replay (5x)** to replay the mission, and open
+   **Reports** to see the generated diagnostic summary.
 
-- __Architecture Diagram:__ `docs/architecture.md` (Detailed system flow and component interactions).
-- __API Contract:__ `docs/api_contract.md` (Swagger/OpenAPI specification reference for all FastAPI endpoints and WebSocket message formats).
-- __Code Implementation:__ The source code resides in `backend/`, `backend-app/`, `ml/`, and `simulator/`.
+## Manual commands
+
+```bash
+# Regenerate the dataset (train/val/test split by mission, no leakage)
+.venv/bin/python -m simulator.generate_dataset --missions 40 --rows-per-mission 4000
+
+# Train models (GPU farm)
+.venv/bin/python -m ml.train_gpu --task all --device auto      # PyTorch + CUDA
+# or CPU baselines (scikit-learn)
+.venv/bin/python -m ml.train_anomaly
+.venv/bin/python -m ml.train_fault_classifier
+.venv/bin/python -m ml.train_degradation_rul
+
+# Run a single mission to CSV
+.venv/bin/python -m simulator.run_simulation --profile hot_weather \
+    --fault-type overheating --output data/mission.csv
+
+# Run tests (works with or without trained models)
+.venv/bin/python -m pytest tests/ -q
+```
+
+## Documentation
+
+- `docs/architecture.md` — system design and data flow
+- `docs/api_contract.md` — REST endpoints + WebSocket messages
+- `docs/gpu_training.md` — **train on your GPU server farm**
+- `docs/task_board.md` — team task status and risks
+- `docs/demo_script.md` — 5-minute and 2-minute demo scripts
+- `docs/model_card.md` — ML models, data, metrics, limitations
+- `PROJECT_PLAN.md` — the original planning document
 
 ---
 
-*Disclaimer: This prototype uses realistic synthetic telemetry data and does not claim flight certification or real-engine validation.*
+*Synthetic data only. Not flight-certified; requires real-engine validation.*
