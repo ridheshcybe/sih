@@ -34,7 +34,8 @@ function twinPoint(twin, label) {
   return {
     t: label,
     health_index: twin.health_index,
-    anomaly_score: twin.anomaly_score,
+    // scale 0-1 to the chart's 0-100 domain
+    anomaly_score: twin.anomaly_score == null ? null : twin.anomaly_score * 100,
     degradation: twin.degradation_level,
   };
 }
@@ -367,7 +368,7 @@ export default function Dashboard() {
                 <Tooltip contentStyle={tooltipStyle} />
                 <Legend wrapperStyle={{ fontSize: 11 }} />
                 <Line name="Health Index" dataKey="health_index" {...chartTheme("#38bdf8")} />
-                <Line name="Anomaly (x100)" dataKey="anomaly_score" {...chartTheme("#f87171")} />
+                <Line name="Anomaly (0-100)" dataKey="anomaly_score" {...chartTheme("#f87171")} />
               </LineChart>
             </ResponsiveContainer>
           </div>

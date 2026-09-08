@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from backend.database import get_db
-from backend.models import Engine, FaultPrediction, Mission, Telemetry, TwinState
+from backend.models import Engine, FaultPrediction, MaintenanceAdvisory, Mission, Telemetry, TwinState
 from backend.services.simulation_runner import runner
 
 router = APIRouter(prefix="/api/v1/engines", tags=["engines"])
@@ -34,6 +34,15 @@ def get_engine_state(engine_id: str, db: Session = Depends(get_db)) -> dict:
         return {"engine_id": engine_id, "mission": None, "running": False, "twin_state": None, "latest_telemetry": None}
     twin = db.query(TwinState).filter(TwinState.mission_id == mission.id).order_by(TwinState.id.desc()).first()
     telemetry = db.query(Telemetry).filter(Telemetry.mission_id == mission.id).order_by(Telemetry.id.desc()).first()
+    advisory = (
+        db.query(MaintenanceAdvisory)
+        .filter(MaintenanceAdvisory.mission_id == mission.id)
+        .order_by(MaintenanceAdvisory.id.desc())
+        .first()
+    )
+    twin_dict = _twin_dict(twin) if twin else None
+    if twin_dict is not None and advisory is not None:
+        twin_dict["advisory"] = {"text": advisory.advisory_text, "priority": advisory.priority}
     return {
         "engine_id": engine_id,
         "mission": {
@@ -42,7 +51,7 @@ def get_engine_state(engine_id: str, db: Session = Depends(get_db)) -> dict:
             "status": mission.status,
         },
         "running": runner.is_running(engine_id),
-        "twin_state": _twin_dict(twin) if twin else None,
+        "twin_state": twin_dict,
         "latest_telemetry": _telemetry_dict(telemetry) if telemetry else None,
     }
 
