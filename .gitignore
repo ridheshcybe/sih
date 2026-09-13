@@ -5,12 +5,17 @@ __pycache__/
 venv/
 *.egg-info/
 
+.*/
+node_modules/
+
 # Generated data / artifacts
 data/*.csv
 data/*.db
 data/*.sqlite3
 models/*.joblib
 models/*.pkl
+models/**/*.joblib
+models/**/*.pkl
 
 # Frontend
 frontend/node_modules/

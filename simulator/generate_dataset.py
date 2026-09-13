@@ -22,17 +22,31 @@ ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = ROOT / "data"
 
 
+def _mission_plan(n_missions: int) -> list:
+    """Deterministic mission plan balancing healthy vs each fault type.
+
+    Round-robin over fault types for the faulty share so every fault type gets
+    (roughly) the same number of missions; profiles rotate independently.
+    """
+    n_healthy = n_missions * 2 // 5          # ~40% healthy
+    n_faulty = n_missions - n_healthy
+    plan = [None] * n_healthy
+    for j in range(n_faulty):
+        plan.append(FAULT_TYPES[j % len(FAULT_TYPES)])
+    return plan
+
+
 def build_dataset(n_missions: int, rows_per_mission: int, seed: int = 7) -> pd.DataFrame:
     """Generate a mix of healthy and faulty missions across all profiles."""
+    plan = _mission_plan(n_missions)
     frames = []
     for i in range(n_missions):
         profile = PROFILE_NAMES[i % len(PROFILE_NAMES)]
         base_seed = seed * 1000 + i
-        # ~40% healthy, ~60% faulty with a rotating fault type.
-        if i % 5 < 2:
-            fault_type, severity = None, 0.0
+        fault_type = plan[i]
+        if fault_type is None:
+            severity = 0.0
         else:
-            fault_type = FAULT_TYPES[i % len(FAULT_TYPES)]
             severity = 0.4 + 0.5 * ((i * 7) % 10) / 10.0
         duration = rows_per_mission * 0.1  # ~90 s per 900 rows
         fault_start = duration * 0.35
@@ -52,14 +66,50 @@ def build_dataset(n_missions: int, rows_per_mission: int, seed: int = 7) -> pd.D
     return pd.concat(frames, ignore_index=True)
 
 
-def split_by_mission(df: pd.DataFrame, train_frac=0.7, val_frac=0.15) -> tuple:
-    """Split by mission id so no mission leaks across splits."""
-    missions = df["mission_id"].unique()
-    rng = np.random.default_rng(1)
+def _mission_fault(df: pd.DataFrame, mission_id: str) -> str:
+    """Dominant non-healthy fault label for a mission ('none' if healthy)."""
+    labels = df.loc[df["mission_id"] == mission_id, "fault_label"]
+    faulty = labels[labels != "none"]
+    if faulty.empty:
+        return "none"
+    return str(faulty.value_counts().idxmax())
+
+
+def split_by_mission(df: pd.DataFrame, train_frac=0.7, val_frac=0.15, seed: int = 1) -> tuple:
+    """Split by mission id, stratified by dominant fault type (no leakage).
+
+    Random splits can leave entire fault classes out of val/test, which makes
+    per-fault F1 impossible to evaluate. Stratifying keeps every fault type
+    represented in every split whenever there are enough missions of it.
+    """
+    missions = list(df["mission_id"].unique())
+    rng = np.random.default_rng(seed)
     rng.shuffle(missions)
-    n_train = int(len(missions) * train_frac)
-    n_val = int(len(missions) * val_frac)
-    train_ids, val_ids, test_ids = set(missions[:n_train]), set(missions[n_train:n_train + n_val]), set(missions[n_train + n_val:])
+
+    by_fault: dict = {}
+    for m in missions:
+        by_fault.setdefault(_mission_fault(df, m), []).append(m)
+
+    train_ids: list = []
+    val_ids: list = []
+    test_ids: list = []
+    for fault, ms in sorted(by_fault.items()):
+        n = len(ms)
+        if n == 1:
+            train_ids += ms
+            continue
+        n_train = int(round(n * train_frac))
+        n_val = int(round(n * val_frac))
+        if n >= 3:
+            # keep at least one mission per fault type in val and in test
+            n_val = max(n_val, 1)
+            n_test = max(n - n_train - n_val, 1)
+            n_train = n - n_val - n_test
+        else:  # n == 2: one to train, one to val
+            n_train, n_val, n_test = 1, 1, 0
+        train_ids += ms[:n_train]
+        val_ids += ms[n_train:n_train + n_val]
+        test_ids += ms[n_train + n_val:]
     return (
         df[df["mission_id"].isin(train_ids)],
         df[df["mission_id"].isin(val_ids)],

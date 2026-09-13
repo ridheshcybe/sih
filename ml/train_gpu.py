@@ -98,10 +98,13 @@ def scale(X_train, X_val, X_test):
 
 
 def make_loader(X, y, batch):
-    t = torch.tensor(X, dtype=torch.float32)
-    if y is not None:
-        t = (t, torch.tensor(y, dtype=torch.float32 if y.dtype == np.float32 else torch.long))
-    ds = TensorDataset(*t)
+    x_t = torch.tensor(X, dtype=torch.float32)
+    if y is None:
+        # Autoencoder training uses the input itself as the target.
+        y_t = x_t.clone()
+    else:
+        y_t = torch.tensor(y, dtype=torch.float32 if y.dtype == np.float32 else torch.long)
+    ds = TensorDataset(x_t, y_t)
     return DataLoader(ds, batch_size=batch, shuffle=True)
 
 
